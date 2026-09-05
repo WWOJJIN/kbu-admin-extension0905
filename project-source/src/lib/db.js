@@ -869,7 +869,11 @@ export async function setAiSummaryMaxAgeDays(days) {
  */
 export async function getAutoDetailFetchOnArrival() {
   const v = await getMeta("autoDetailFetchOnArrival");
-  return v === true; // 기본값 false
+  // 2026-09-05: 기본값 false → true로 변경. AI 요약 기능을 실제로 쓰기 시작하는
+  // 단계라 "새 문서 도착 시 자동으로 상세+요약까지 만들어두는" 게 기본 동작이
+  // 되어야 한다는 요청 반영. ERP "열람" 컬럼이 실제 확인 전에 Y로 바뀔 수 있다는
+  // 트레이드오프는 그대로 있음(설정 탭 설명 참고) — 그래도 기본은 켜둔다.
+  return v === undefined || v === null ? true : v === true;
 }
 
 /**

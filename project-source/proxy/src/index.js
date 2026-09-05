@@ -26,6 +26,28 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_OUTPUT_TOKENS = 1024;
 const DEFAULT_MODEL = "claude-haiku-4-5";
+// 2026-09-05 추가: claudeApi.js가 항상 자체 SYSTEM_PROMPT(스키마 명시)를 보내므로
+// 평소엔 이 기본값이 안 쓰이지만, 혹시 system 필드 없이 호출되는 경우를 대비한
+// 방어적 기본값 — claudeApi.js와 반드시 같은 필드 스키마를 유지할 것.
+const DEFAULT_SYSTEM_PROMPT = `당신은 대학 행정 협조문을 분석하는 어시스턴트입니다.
+사용자가 보낸 협조문 원문을 분석해서, 아래 7개 필드로만 구성된 JSON 객체 하나를
+반환하세요. 코드펜스나 설명 문장 없이 JSON 객체만 반환합니다.
+
+{
+  "title": "문서 제목 (string)",
+  "sender_dept": "발신 부서명 (string, 원문에서 찾을 수 없으면 빈 문자열)",
+  "deadline": "마감기한, YYYY-MM-DD 형식의 문자열. 명시된 마감일이 없으면 null (문자열 아님)",
+  "requires_action": "조교/담당자가 실제로 처리해야 할 일이 있으면 true, 단순 통보/참고용이면 false (boolean)",
+  "action_type": "requires_action이 true일 때, 해야 할 행동을 다음 중 하나의 짧은 한국어 단어로: 회신, 제출, 확인, 참석, 결재, 신청, 기타. requires_action이 false면 null",
+  "action_description": "requires_action이 true일 때, 정확히 무엇을 누구에게/어디로 제출·회신해야 하는지 10~20자 내외로 아주 짧게(명사구로). requires_action이 false면 null",
+  "summary": "문서 용건을 한 문장, 25자 내외의 명사구로 압축"
+}
+
+summary 작성 예시:
+- 나쁜 예: "국민취업지원제도 안내를 위해 2026년 9월부터 12월까지 학과사무실을 방문하는 설명회를 운영합니다."
+- 좋은 예: "국민취업지원제도 설명회 방문 협조 요청"
+summary는 배경 설명 없이 "무엇에 대한 협조/통보인지"만 명사구로 압축하고, 두 문장
+이상 쓰지 마세요.`;
 // 캐시 보관 기간. 협조문 내용은 한 번 등록되면 안 바뀌는 게 보통이라 길게 잡아도
 // 안전함 — 상태(stGbn) 변경은 별도 로직(handleChangedCoopDoc)이 처리하고, 이 캐시는
 // "본문 텍스트 → 파싱 결과" 매핑만 담당한다.
@@ -75,13 +97,14 @@ export default {
     }
 
     // 2026-09-05(3) 수정: 캐시 키에 system 프롬프트 해시를 포함시킴. 이전엔
-    // doc_id만으로 캐시 키를 만들어서, 프롬프트를 고쳐도(예: summary 3줄 제약 추가)
-    // 예전 프롬프트로 파싱해서 캐시된 문서는 30일 TTL 동안 계속 옛날(장황한) 결과를
-    // 그대로 돌려주는 버그가 있었음(실사용 리포트로 발견: "AI가 본문을 그대로
-    // 가져온다"). 이제는 system 프롬프트 내용이 바뀌면 캐시 키도 자동으로 달라져서
-    // 예전 캐시는 그냥 안 쓰이게 되고(=사실상 자동 무효화), 새 프롬프트로 다시
-    // 파싱된다.
-    const systemPrompt = system || "JSON만 반환하세요.";
+    // doc_id만으로 캐시 키를 만들어서, 프롬프트를 고쳐도(예: summary 길이/톤
+    // 조정) 예전 프롬프트로 파싱해서 캐시된 문서는 30일 TTL 동안 계속 옛날
+    // 결과를 그대로 돌려주는 버그가 있었음(실사용 리포트: "AI가 본문을 그대로
+    // 가져온다"). 이제는 system 프롬프트 내용이 바뀌면 캐시 키도 자동으로
+    // 달라져서 예전 캐시는 그냥 안 쓰이게 되고(=사실상 자동 무효화), 새
+    // 프롬프트로 다시 파싱된다. (클라이언트 쪽 ai_summary_prompt_version +
+    // 일괄 재요약 기능과는 별개의, 서버 쪽 이중 안전장치.)
+    const systemPrompt = system || DEFAULT_SYSTEM_PROMPT;
 
     // doc_id가 왔으면 캐시부터 확인 — 같은 문서를 다른 직원이 먼저 파싱해뒀으면
     // Claude API를 아예 안 부르고 그 결과를 그대로 돌려준다.

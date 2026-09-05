@@ -14,7 +14,6 @@
 import {
   upsertCoopDoc,
   getCoopDoc,
-  getAllCoopDocs,
   getAllCoopDocIds,
   hasCoopDocStatusChanged,
   getAllApprovalItemIds,
@@ -31,8 +30,6 @@ import {
   getAiSummaryMaxAgeDays,
   getSyncBaselineDone,
   setSyncBaselineDone,
-  getMeta,
-  setMeta,
 } from "../src/lib/db.js";
 import {
   fetchMyCoopDocList,
@@ -48,7 +45,7 @@ import {
   RAW_TEXT_EXTRACT_VERSION,
   RECV_DEPT_SCHEMA_VERSION,
 } from "../src/lib/kisApi.js";
-import { parseCoopDoc } from "../src/lib/claudeApi.js";
+import { parseCoopDoc, PROMPT_VERSION } from "../src/lib/claudeApi.js";
 import { fillParsedFallback } from "../src/lib/textUtils.js";
 
 const POLL_ALARM_NAME = "coopDocPoll";
@@ -67,67 +64,11 @@ chrome.runtime.onInstalled.addListener(() => {
   pollCoopDocs(); // 설치 직후 1회 즉시 실행 (기다리지 않고 바로 확인)
   pollApprovalStatus();
   pollStatusChanges();
-  migrateStaleAiSummariesOnce();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupAlarm();
-  migrateStaleAiSummariesOnce();
 });
-
-// ---------------------------------------------------------------------------
-// 2026-09-05: 1회성 마이그레이션 — 프록시 캐시 키에 system 프롬프트 해시를
-// 넣기 전에(즉, summary 3줄 제약이 프롬프트에 추가되기 전에) 이미 파싱/캐시돼서
-// IndexedDB에 저장된 문서는 옛날 프롬프트가 만든 장황한 ai_summary를 그대로
-// 들고 있음(실사용 리포트: "AI가 본문을 그대로 가져온다"). 프록시 캐시는 이제
-// 프롬프트가 바뀌면 doc_id+프롬프트 해시 키가 달라져서 자동으로 새로 파싱되지만,
-// 그건 "프록시를 다시 호출했을 때"의 얘기고 — 이미 로컬 IndexedDB에 박제된
-// ai_summary 자체는 누가 다시 안 부르면 그대로 남아있다. background.js의 일반
-// 폴링(diffCoopDocList)은 "신규/상태변경" 항목만 다시 파싱하도록 설계돼있어서
-// (Claude API 비용 절감이 원래 목적) 이미 저장된 문서는 자동으로는 재파싱 안 됨.
-// 그래서 확장이 설치되거나 리로드될 때(chrome://extensions에서 리로드 포함,
-// onInstalled의 reason="update") 딱 1번, raw_text가 있는 모든 협조문을 새
-// 프롬프트로 다시 파싱해서 ai_summary/deadline/requires_action/
-// action_description을 갱신한다. getMeta/setMeta(IndexedDB meta 스토어)에
-// 완료 플래그를 남겨서 이후로는 두 번 다시 안 돈다(=1회성).
-const AI_SUMMARY_MIGRATION_KEY = "ai_summary_migration_20260905_promptHashFix_done";
-
-async function migrateStaleAiSummariesOnce() {
-  try {
-    const done = await getMeta(AI_SUMMARY_MIGRATION_KEY);
-    if (done) return;
-
-    const docs = await getAllCoopDocs();
-    const targets = docs.filter((d) => d.raw_text && d.raw_text.trim() && !d.body_unavailable);
-
-    console.log(`[migration] AI 요약 재생성 시작 (프롬프트 수정 반영): 대상 ${targets.length}건`);
-
-    // 프록시/Claude API에 한꺼번에 몰리지 않도록 순차 처리(동시성 1).
-    // 한 건 실패해도(예: 네트워크 순간 오류) 나머지는 계속 진행한다 — 실패한
-    // 문서는 다음 마이그레이션 기회가 없으므로(플래그가 성공 여부와 무관하게
-    // 끝에 딱 1번만 세팅됨) 개별 실패를 전체 중단으로 이어가지 않는 게 맞다.
-    for (const doc of targets) {
-      try {
-        const parsed = await parseCoopDoc(doc.raw_text, doc.id);
-        await upsertCoopDoc({
-          ...doc,
-          ai_summary: parsed.summary || doc.ai_summary,
-          deadline: parsed.deadline ?? doc.deadline,
-          requires_action:
-            typeof parsed.requires_action === "boolean" ? parsed.requires_action : doc.requires_action,
-          action_description: parsed.action_description ?? doc.action_description,
-        });
-      } catch (err) {
-        console.warn(`[migration] 문서 재파싱 실패 (id=${doc.id}):`, err);
-      }
-    }
-
-    await setMeta(AI_SUMMARY_MIGRATION_KEY, true);
-    console.log("[migration] AI 요약 재생성 완료");
-  } catch (err) {
-    console.warn("[migration] 마이그레이션 자체 실패:", err);
-  }
-}
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM_NAME) {
@@ -970,6 +911,12 @@ function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVe
     body_unavailable: bodyUnavailable,
     raw_text_version: rawTextVersion,
     ai_summary: parsed?.summary || "",
+    // 2026-09-05(4) 추가: 이 요약이 어느 프롬프트 버전으로 만들어졌는지 기록.
+    // parsed가 없으면(AI 스킵/실패) null — useStore.js가 재요약 대상 판단에 씀.
+    ai_summary_prompt_version: parsed ? PROMPT_VERSION : null,
+    // 2026-09-05(2) 추가: "회신/제출/확인" 등 처리유형을 요약 본문과 분리된
+    // 필드로 저장 — CoopCard.jsx가 이 값으로 배지를 바로 보여준다.
+    action_type: parsed?.action_type ?? null,
     deadline: fallback.deadline,
     requires_action: fallback.requires_action,
     // 규칙 기반 값인지 AI 값인지 UI에서 구분하고 싶을 때 참고용 플래그

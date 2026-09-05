@@ -108,9 +108,13 @@ function HeaderBadge({ doc }) {
 
 function StatusBadge({ doc }) {
   if (doc.requires_action && !doc.is_completed) {
+    // 2026-09-05(2): action_type이 있으면 "처리 필요"라는 뭉뚱그린 표현 대신
+    // "회신 필요"/"제출 필요"처럼 구체적으로 보여준다 — 실사용 피드백("회신인지
+    // 제출인지 확인해야하는지 여부를 알려줬으면") 반영.
+    const label = doc.action_type ? `${doc.action_type} 필요` : "처리 필요";
     return (
       <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-[6px] bg-[#FDF3E7] text-[#D9822B]">
-        처리 필요
+        {label}
       </span>
     );
   }
@@ -132,10 +136,11 @@ function StatusBadge({ doc }) {
 }
 
 export default function CoopCard({ doc, onClick, expanded = true }) {
-  // ai_summary(AI 3줄 요약)는 프록시 미배포 상태라 항상 비어있음 — 그동안 카드에
-  // 요약 줄이 아예 안 뜨던 문제. 프록시 배포 전까지는 mockSummarize(kisApi.js)로
-  // 대체해서 보여준다. 프록시 배포되면 doc.ai_summary가 채워져서 자동으로
-  // 이쪽 대신 그게 쓰임.
+  // 2026-09-05 수정: ai_summary가 비어서 mockSummarize(본문 앞부분을 그냥 잘라낸
+  // 발췌, AI 아님)로 대체되는 경우에도 라벨이 계속 "AI Summary"로 고정 표시돼서
+  // 실사용 중 "이거 그냥 본문 복붙 아니냐"는 혼란이 있었음 — isRealAiSummary로
+  // 실제 출처를 구분해서 라벨/스타일을 다르게 보여준다.
+  const isRealAiSummary = Boolean(doc.ai_summary);
   const summaryText = doc.ai_summary || mockSummarize(doc);
 
   return (
@@ -221,27 +226,60 @@ export default function CoopCard({ doc, onClick, expanded = true }) {
       <div className="mt-auto w-full text-left">
         <div className="mx-2.5 mb-2.5 rounded-[10px] bg-[#F5F7FF] border border-[#E4E7F2] overflow-hidden">
         <div className={`flex items-center justify-between px-3 pt-2 pb-1.5 ${expanded ? "border-b border-[#E4E7F2]" : ""}`}>
-          <p className="text-[10px] font-bold tracking-wide text-[#3D57E8] flex items-center gap-1">
-            <span aria-hidden>✨</span>AI Summary
-          </p>
-        </div>
-        {/* 2026-08-22(12): "펼쳐도/접어도 카드마다 크기가 제각각" 리포트 대응 —
-            display:-webkit-box(line-clamp)+Tailwind h-[96px] 조합이 카드마다
-            다르게 렌더링됐음(브라우저 렌더링 특성상 -webkit-box가 명시적
-            height를 항상 그대로 지키지 않는 경우가 있어 내용이 짧으면 박스가
-            같이 줄어들어 버림). line-clamp/-webkit-box를 걷어내고 순수
-            height(inline style, Tailwind 클래스 의존 없이 확실하게) +
-            overflow:hidden만 써서 내용 길이와 무관하게 100% 같은 크기를
-            강제함(대신 4줄 넘는 텍스트는 줄임표(...) 없이 그냥 잘림 —
-            크기 일관성이 더 중요하다고 판단).
-            2026-08-23(16): expanded prop이 false면(전체 탭) 본문 자체를 아예
-            안 그림 — 라벨 바만 남고 카드가 그만큼 짧아짐. */}
-        {expanded && (
-          <div
-            className="px-3 py-2.5 text-[#3D57E8] text-[12px] leading-[1.55] whitespace-pre-line overflow-hidden box-border"
-            style={{ height: "96px" }}
+          <p
+            className={`text-[10px] font-bold tracking-wide flex items-center gap-1 ${
+              isRealAiSummary ? "text-[#3D57E8]" : "text-[#8B8FA3]"
+            }`}
           >
-            {summaryText || "요약 불가"}
+            {isRealAiSummary ? (
+              <>
+                <span aria-hidden>✨</span>AI Summary
+              </>
+            ) : (
+              <>
+                <span aria-hidden>📄</span>본문 발췌 (AI 요약 아님)
+              </>
+            )}
+          </p>
+          {/* 2026-09-05(2) 추가: 회신/제출/확인 등 처리유형을 요약 라벨과 같은
+              줄에 배지로 바로 보여줌 — "요약 읽기 전에 뭘 해야 하는지부터
+              알고 싶다"는 실사용 피드백 반영. */}
+          {isRealAiSummary && doc.action_type && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#3D57E8] text-white flex-shrink-0">
+              {doc.action_type} 필요
+            </span>
+          )}
+        </div>
+        {/* 2026-09-05(3) 수정: "조치 내용이 길면 잘린다"는 리포트 — 예전엔
+            카드 그리드 높이를 딱 맞추려고 요약 영역을 고정 높이(height:40px/96px)
+            + overflow:hidden으로 강제했고, 기한/조치 줄도 truncate(한 줄+말줄임)
+            였다. 그러다 보니 조치 설명이 조금만 길어도 중간에 잘려서 정작
+            중요한 정보(뭘 해야 하는지)가 안 보이는 문제가 있었음. 카드마다
+            높이가 살짝 달라지는 걸 감수하고, 고정 높이/overflow-hidden/truncate를
+            전부 없애서 내용이 항상 끝까지 다 보이게 함. */}
+        {expanded && (
+          <div className="px-3 py-2.5">
+            <div
+              className={`text-[12px] leading-[1.5] whitespace-pre-line ${
+                isRealAiSummary ? "text-[#3D57E8]" : "text-[#6B7280]"
+              }`}
+            >
+              {summaryText || "요약 불가"}
+            </div>
+            {isRealAiSummary && (doc.deadline || doc.action_description) && (
+              <div className="mt-1.5 pt-1.5 border-t border-[#E4E7F2] flex flex-col gap-1">
+                {doc.deadline && (
+                  <p className="text-[11px] text-[#4B5563] leading-[1.4]">
+                    <span className="font-semibold text-[#3D57E8]">기한</span> {doc.deadline}
+                  </p>
+                )}
+                {doc.action_description && (
+                  <p className="text-[11px] text-[#4B5563] leading-[1.4]">
+                    <span className="font-semibold text-[#3D57E8]">조치</span> {doc.action_description}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
         </div>

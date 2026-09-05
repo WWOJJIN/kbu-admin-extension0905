@@ -10,8 +10,11 @@ import {
   markCoopDocCalendarRegistered,
   upsertCoopDoc,
   deleteCoopDoc,
+  getAiSummaryEnabled,
+  getAiSummaryMaxAgeDays,
 } from "../lib/db.js";
 import { createGoogleCalendarEvent } from "../lib/googleCalendar.js";
+import { parseCoopDoc, PROMPT_VERSION } from "../lib/claudeApi.js";
 import { fillParsedFallback } from "../lib/textUtils.js";
 import {
   fetchCoopDocDetail,
@@ -113,6 +116,9 @@ const useStore = create((set, get) => ({
   // 배포해도 계정별로 자동으로 맞게 나옴(고정값 아님).
   userName: null,
   userGbInfo: null,
+  // 2026-09-05 추가: "기존 문서 일괄 재요약" 진행 상태. SettingsPage가 이 값을
+  // 읽어서 진행 바/버튼 비활성화를 표시한다. null이면 실행 중 아님.
+  resummarizeProgress: null, // { total, done, failed } | null
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setSelectedDeptGroup: (key) => set({ selectedDeptGroupKey: key }),
@@ -265,6 +271,125 @@ const useStore = create((set, get) => ({
    * 기존 필터로는 재보정 대상에서 빠짐 — raw_text_version과 같은 패턴으로
    * recv_dept_version을 같이 저장해 강제로 다시 채운다.
    */
+  /**
+   * 2026-09-05 추가: "기존 문서 일괄 재요약" 기능.
+   *
+   * 배경: AI 파싱은 background.js가 문서를 "처음 감지한 그 순간"에만 딱 한 번
+   * 시도된다(설정이 꺼져있었거나, AI 요약 대상 기간을 넘겼거나, 프록시가 아직
+   * 준비 안 됐던 시점이면 그때 실패/스킵되고 재시도가 없음). 그래서 이미 저장된
+   * 문서 중 상당수가 ai_summary 없이(=카드에 "본문 발췌" 라벨) 영구히 남는
+   * 문제가 실사용 중 발견됨(345건 중 다수). 이 함수는 그런 문서들을 찾아서
+   * 사용자가 명시적으로 누를 때만 한 번에 재처리한다(자동 실행 아님 — Claude
+   * API 비용이 실제로 발생하는 작업이라 사용자 동의 없이 조용히 돌리면 안 됨).
+   *
+   * 대상 조건: ai_summary가 비어있고, AI 요약 대상 기간(설정) 이내인 문서.
+   * (AI 요약 자체가 꺼져있으면 대상이 0건 — 그 경우 UI에서 안내만 하고 실행 안 함)
+   */
+  /**
+   * @param {{ ageDaysOverride?: number, includeUnknownDate?: boolean }} [options]
+   *   ageDaysOverride: 지정하면 설정 탭의 전역 AI 요약 대상 기간 대신 이 값을
+   *   쓴다(일괄 재요약 전용으로 더 좁게/넓게 조절하고 싶을 때). 0이면 제한 없음.
+   *   includeUnknownDate: 문서 날짜를 모를 때 포함시킬지. 기본 false — 일괄
+   *   재요약은 사용자가 비용을 감안해서 누르는 명시적 작업이라, "모르면 안전하게
+   *   포함"보다 "모르면 안전하게 제외"가 비용 통제 관점에서 더 맞음(반대로 평소
+   *   새 문서 감지 흐름은 날짜가 항상 확실히 있어서 이 케이스 자체가 안 생김).
+   */
+  getMissingAiSummaryCandidates: async (options = {}) => {
+    const { ageDaysOverride, includeUnknownDate = false } = options;
+    const [docs, defaultMaxAgeDays] = await Promise.all([
+      get().coopDocs.length ? get().coopDocs : getAllCoopDocs(),
+      getAiSummaryMaxAgeDays(),
+    ]);
+    const maxAgeDays = ageDaysOverride !== undefined ? ageDaysOverride : defaultMaxAgeDays;
+    const now = Date.now();
+    return docs.filter((d) => {
+      // 2026-09-05(4) 수정: ai_summary가 있어도 "예전 프롬프트 버전"으로
+      // 만들어진 거면(너무 길거나 너무 짧았던 버전) 다시 대상에 포함시킨다 —
+      // 안 그러면 프롬프트를 개선해도 이미 요약된 문서는 영원히 예전 버전으로
+      // 남아있고, 재요약 버튼도 "대상 0건"으로 계속 비활성화되는 문제가 있었음.
+      if (d.ai_summary && (d.ai_summary_prompt_version || 0) >= PROMPT_VERSION) return false;
+      if (!maxAgeDays || maxAgeDays <= 0) return true; // 제한 없음
+      if (!d.date) return includeUnknownDate;
+      const docTime = new Date(`${d.date}T00:00:00`).getTime();
+      if (Number.isNaN(docTime)) return includeUnknownDate;
+      return now - docTime <= maxAgeDays * 24 * 60 * 60 * 1000;
+    });
+  },
+
+  /**
+   * 실제 일괄 재요약 실행. 순차 처리(Promise.all로 동시에 안 쏨) — Claude
+   * API/프록시에 순간적으로 부하가 몰리는 것과, 실패 시 원인 파악이 어려워지는
+   * 것 둘 다 피하려는 목적. 진행 상황은 resummarizeProgress로 실시간 갱신.
+   * @param {{ ageDaysOverride?: number }} [options]
+   */
+  bulkResummarizeMissingAi: async (options = {}) => {
+    if (!(await getAiSummaryEnabled())) {
+      get().showToast("AI 요약이 꺼져있어서 실행할 수 없어요. 설정 탭에서 먼저 켜주세요.");
+      return;
+    }
+    const candidates = await get().getMissingAiSummaryCandidates(options);
+    if (candidates.length === 0) {
+      get().showToast("재요약이 필요한 문서가 없어요.");
+      return;
+    }
+
+    set({ resummarizeProgress: { total: candidates.length, done: 0, failed: 0 } });
+
+    for (const doc of candidates) {
+      try {
+        let rawText = doc.raw_text || "";
+        // 본문이 아직 제대로 안 채워진 문서(제목만 있거나 body_unavailable)는
+        // AI에 넘겨봤자 요약이 부실하므로, 먼저 ERP 상세를 한 번 더 가져온다.
+        if (looksLikeMissingBody(doc) && !doc.body_unavailable) {
+          try {
+            const detailRows = await fetchCoopDocDetail({ aprvNo: doc.id });
+            const detail = detailRows[0];
+            const extracted = detail ? extractDetailText(detail) : "";
+            if (extracted) rawText = extracted;
+          } catch (err) {
+            console.warn(`[store] 재요약 전 상세 재조회 실패 (id=${doc.id}):`, err);
+          }
+        }
+
+        if (!rawText) {
+          set((s) => ({
+            resummarizeProgress: { ...s.resummarizeProgress, done: s.resummarizeProgress.done + 1, failed: s.resummarizeProgress.failed + 1 },
+          }));
+          continue;
+        }
+
+        const parsed = await parseCoopDoc(rawText, doc.id);
+        const fallback = fillParsedFallback(parsed, rawText);
+        await upsertCoopDoc({
+          ...doc,
+          raw_text: rawText,
+          ai_summary: parsed?.summary || "",
+          ai_summary_prompt_version: PROMPT_VERSION,
+          action_type: parsed?.action_type ?? doc.action_type ?? null,
+          deadline: fallback.deadline,
+          requires_action: fallback.requires_action,
+          deadline_is_fallback: parsed?.deadline == null,
+          requires_action_is_fallback: parsed?.requires_action == null,
+          action_description: parsed?.action_description ?? doc.action_description ?? null,
+        });
+        set((s) => ({
+          resummarizeProgress: { ...s.resummarizeProgress, done: s.resummarizeProgress.done + 1 },
+        }));
+      } catch (err) {
+        console.error(`[store] 재요약 실패 (id=${doc.id}):`, err);
+        set((s) => ({
+          resummarizeProgress: { ...s.resummarizeProgress, done: s.resummarizeProgress.done + 1, failed: s.resummarizeProgress.failed + 1 },
+        }));
+      }
+    }
+
+    const finalProgress = get().resummarizeProgress;
+    get().showToast(
+      `일괄 재요약 완료: ${finalProgress.total - finalProgress.failed}건 성공, ${finalProgress.failed}건 실패`
+    );
+    set({ resummarizeProgress: null });
+    await get().loadCoopDocs();
+  },
   backfillMissingDrafters: async () => {
     const docs = get().coopDocs.length ? get().coopDocs : await getAllCoopDocs();
     const missing = docs.filter(

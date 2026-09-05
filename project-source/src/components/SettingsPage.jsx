@@ -20,6 +20,7 @@ import {
 } from "../lib/db.js";
 
 const AI_SUMMARY_AGE_OPTIONS = [7, 14, 30, 60, 90, 0]; // 0 = 제한 없음
+const BULK_RESUMMARIZE_AGE_OPTIONS = [1, 3, 7, 14, 30, 0]; // 0 = 제한 없음, 일괄 재요약 전용(더 촘촘한 선택지)
 
 const WEEK_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
 
@@ -82,11 +83,26 @@ function FeatureTogglesSection() {
 function AiSummaryToggleSection() {
   const [enabled, setEnabled] = useState(null);
   const [maxAgeDays, setMaxAgeDays] = useState(null);
+  const [missingCount, setMissingCount] = useState(null);
+  // 일괄 재요약 전용 기간 — 평소 새 문서용 AI_SUMMARY 기간(maxAgeDays)과는
+  // 별개로, 이 한 번의 정리 작업만 더 좁게 조절할 수 있게 분리함. 기본값은
+  // 7일로 시작 — 이미 쌓인 백로그는 대부분 최근 문서라(신규 도입 초기),
+  // 전역 30일 설정으로는 거의 안 걸러지는 걸 확인해서 더 보수적인 기본값을 씀.
+  const [bulkAgeDays, setBulkAgeDays] = useState(7);
+
+  const getMissingAiSummaryCandidates = useStore((s) => s.getMissingAiSummaryCandidates);
+  const bulkResummarizeMissingAi = useStore((s) => s.bulkResummarizeMissingAi);
+  const resummarizeProgress = useStore((s) => s.resummarizeProgress);
 
   useEffect(() => {
     getAiSummaryEnabled().then(setEnabled);
     getAiSummaryMaxAgeDays().then(setMaxAgeDays);
   }, []);
+
+  // bulkAgeDays가 바뀔 때마다 그 기준으로 대상 건수를 다시 센다.
+  useEffect(() => {
+    getMissingAiSummaryCandidates({ ageDaysOverride: bulkAgeDays }).then((docs) => setMissingCount(docs.length));
+  }, [bulkAgeDays, getMissingAiSummaryCandidates]);
 
   if (enabled === null || maxAgeDays === null) return null;
 
@@ -100,6 +116,17 @@ function AiSummaryToggleSection() {
     const next = Number(e.target.value);
     setMaxAgeDays(next);
     await setAiSummaryMaxAgeDays(next);
+  };
+
+  const handleBulkResummarize = async () => {
+    if (!missingCount) return;
+    const ok = window.confirm(
+      `최근 ${bulkAgeDays === 0 ? "전체 기간" : `${bulkAgeDays}일`} 문서 중 AI 요약이 없는 ${missingCount}건을 지금 요약할까요?\n` +
+        `문서 수만큼 Claude API 호출이 발생해서 비용이 듭니다. 시간이 좀 걸릴 수 있어요.`
+    );
+    if (!ok) return;
+    await bulkResummarizeMissingAi({ ageDaysOverride: bulkAgeDays });
+    getMissingAiSummaryCandidates({ ageDaysOverride: bulkAgeDays }).then((docs) => setMissingCount(docs.length));
   };
 
   return (
@@ -144,6 +171,53 @@ function AiSummaryToggleSection() {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* 2026-09-05 추가: 기존 문서 일괄 재요약. AI 파싱은 "처음 감지된 순간"
+          단 한 번만 시도되고 재시도가 없어서, 그 시점에 설정이 꺼져있었거나
+          프록시가 아직 준비 안 됐던 문서는 영구히 "본문 발췌"로만 남는 문제가
+          실사용 중 발견됨(345건 중 다수 — 콘솔 로그 "신규 0, 상태변경 0"으로
+          더 이상 자동으로는 처리 안 된다는 게 확인됨). 자동 실행하면 안 되고
+          (실제 비용 발생), 사용자가 건수를 보고 명시적으로 눌러야 실행됨. */}
+      <div className={`mt-2 border border-brand-border rounded-lg px-3.5 py-2.5 ${enabled ? "" : "opacity-50"}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="pr-3">
+            <p className="text-sm text-brand-navy">기존 문서 일괄 재요약</p>
+            <p className="text-xs text-brand-muted mt-0.5">
+              AI 요약 없이 저장된(카드에 "본문 발췌"로 뜨는) 문서를 지금 한꺼번에 요약해요. 문서 수만큼 Claude
+              API 호출이 발생하니, 아래에서 최근 며칠치만 대상으로 할지 먼저 좁혀서 비용을 조절하세요. 날짜를
+              모르는 문서는 비용 안전을 위해 대상에서 자동 제외돼요.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3 mt-2.5">
+          <select
+            value={bulkAgeDays}
+            onChange={(e) => setBulkAgeDays(Number(e.target.value))}
+            disabled={!enabled || !!resummarizeProgress}
+            className="border border-brand-border rounded px-1.5 py-1 text-xs bg-white"
+          >
+            {BULK_RESUMMARIZE_AGE_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                최근 {d === 0 ? "전체 기간" : `${d}일`}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleBulkResummarize}
+            disabled={!enabled || !missingCount || !!resummarizeProgress}
+            className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-md bg-brand-blue text-white disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {resummarizeProgress ? "처리 중…" : `${missingCount ?? "-"}건 요약하기`}
+          </button>
+        </div>
+        {resummarizeProgress && (
+          <p className="text-xs text-brand-muted mt-2">
+            진행 중: {resummarizeProgress.done}/{resummarizeProgress.total}건
+            {resummarizeProgress.failed > 0 ? ` (실패 ${resummarizeProgress.failed}건)` : ""}
+          </p>
+        )}
       </div>
     </div>
   );

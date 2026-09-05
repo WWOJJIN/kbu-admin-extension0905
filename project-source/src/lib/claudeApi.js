@@ -10,17 +10,34 @@ const PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev";
 const PROXY_SECRET_HEADER = "x-proxy-secret";
 const PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 
-const SYSTEM_PROMPT = [
-  "대학 행정 협조문 분석 어시스턴트. JSON만 반환. 다른 텍스트 없음.",
-  "아래 6개 키를 정확히 이 이름 그대로 포함한 JSON 객체 하나만 반환하세요(다른 키 추가 금지):",
-  '- title (string): 문서 제목',
-  '- sender_dept (string): 발신 부서명',
-  '- deadline (string 또는 null): 마감기한. 반드시 "YYYY-MM-DD" 형식, 기한이 명시 안 됐으면 null',
-  '- requires_action (boolean): 수신자가 회신/제출/조치를 해야 하는 문서인지',
-  '- action_description (string 또는 null): 필요한 조치 내용 한 줄 설명, 없으면 null',
-  '- summary (string): 문서 핵심 내용 요약. 반드시 3줄 이내(줄바꿈 최대 2번)로, 각 줄은 공백 포함 40자 이내로 간결하게 작성. 3줄을 넘기거나 장황하게 풀어 쓰지 말 것.',
-].join("\n"); // 2026-09-05(2): 필드 스펙 + 3줄 제약 명시 안 하면 summary가 무제한으로 길어지는
-// 문제가 있어서(실사용 리포트) 추가함 — W님이 doc_id 캐싱을 추가한 버전 위에 병합.
+// 2026-09-05(4) 수정: 실사용 피드백 — 예전 프롬프트(산문형)는 너무 길고,
+// 그 다음 시도(25자 명사구 강제)는 너무 짧아서 자연스러운 문장이 안 됨.
+// "한 문장, 40~60자" 정도의 중간 지점으로 재조정. 예시도 그 길이에 맞게 다시 씀.
+const SYSTEM_PROMPT = `당신은 대학 행정 협조문을 분석하는 어시스턴트입니다.
+사용자가 보낸 협조문 원문을 분석해서, 아래 7개 필드로만 구성된 JSON 객체 하나를
+반환하세요. 코드펜스나 설명 문장 없이 JSON 객체만 반환합니다.
+
+{
+  "title": "문서 제목 (string)",
+  "sender_dept": "발신 부서명 (string, 원문에서 찾을 수 없으면 빈 문자열)",
+  "deadline": "마감기한, YYYY-MM-DD 형식의 문자열. 명시된 마감일이 없으면 null (문자열 아님)",
+  "requires_action": "조교/담당자가 실제로 처리해야 할 일이 있으면 true, 단순 통보/참고용이면 false (boolean)",
+  "action_type": "requires_action이 true일 때, 해야 할 행동을 다음 중 하나의 짧은 한국어 단어로: 회신, 제출, 확인, 참석, 결재, 신청, 기타. requires_action이 false면 null",
+  "action_description": "requires_action이 true일 때, 정확히 무엇을 누구에게/어디로 제출·회신해야 하는지 15~25자 정도로 짧게. requires_action이 false면 null",
+  "summary": "문서 용건을 자연스러운 한 문장, 40~60자 정도로 요약. 아래 예시의 '좋은 예' 길이/톤을 반드시 따를 것"
+}
+
+summary 작성 예시 (반드시 이 정도 길이/톤을 따를 것):
+- 나쁜 예(너무 김): "국민취업지원제도 안내를 위해 2026년 9월부터 12월까지 학과사무실을 방문하는 설명회를 운영합니다. 학과는 위탁기관 담당자의 방문에 협조하고 홍보물을 게시해야 하며, 학과 맞춤형 설명회 일정을 협의해야 합니다."
+- 나쁜 예(너무 짧음, 문장이 아니라 명사구만): "국민취업지원제도 설명회 방문 협조 요청"
+- 좋은 예(딱 적당함): "국민취업지원제도 설명회를 위해 학과사무실 방문 협조와 일정 협의를 요청하는 안내입니다."
+- 나쁜 예(너무 김): "2026년 9월 7일부터 11월 2일까지 광릉테크노밸리 산업단지에서 진행되는 AI 직무교육을 위해 소프트웨어융합학과 공용장비 노트북 10대를 대여합니다. 교육 담당자가 장비를 관리하고 교육 종료 후 상태를 확인하여 일괄 반납해야 합니다."
+- 나쁜 예(너무 짧음): "AI 직무교육용 노트북 10대 대여 협조"
+- 좋은 예(딱 적당함): "AI 직무교육에 필요한 공용 노트북 10대를 대여하니 담당자가 관리해달라는 요청입니다."
+
+summary는 배경 설명·세부 절차를 늘어놓지 말고 핵심 용건 하나만 자연스러운 문장으로
+쓰되, 명사구로 뚝 끊지 말고 "~요청입니다/~안내입니다"처럼 문장으로 끝맺으세요.
+두 문장 이상 쓰지 마세요.`;
 
 /**
  * @typedef {Object} ParsedCoopDoc
@@ -28,8 +45,9 @@ const SYSTEM_PROMPT = [
  * @property {string} sender_dept
  * @property {string|null} deadline  YYYY-MM-DD or null
  * @property {boolean} requires_action
+ * @property {string|null} action_type  "회신"|"제출"|"확인"|"참석"|"결재"|"신청"|"기타"|null
  * @property {string|null} action_description
- * @property {string} summary  3줄 요약
+ * @property {string} summary  짧은 핵심 요약(1~2문장)
  */
 
 /**
@@ -87,13 +105,37 @@ async function callProxyWithRetry(rawText, aprvNo, retries) {
  * @param {Object} data
  * @returns {ParsedCoopDoc}
  */
+// 2026-09-05(3) 추가: 프롬프트로 길이를 아무리 지시해도 모델이 가끔 길게
+// 쓸 수 있다는 걸 감안해서, 화면에서 다시 "구구절절"해지는 걸 막는 최후의
+// 안전장치. 첫 문장만 남기고, 그래도 길면 글자수로 강제 컷.
+// 2026-09-05(4): 목표 길이를 40~60자로 재조정하면서 강제컷 한도도 같이 늘림
+// (40자는 너무 타이트해서 문장이 아니라 명사구로만 끝나버리는 원인이었음).
+const SUMMARY_MAX_CHARS = 70;
+const ACTION_DESC_MAX_CHARS = 35;
+function enforceShortText(text, maxChars) {
+  if (!text) return "";
+  const firstSentence = text.split(/(?<=[.!?다요함음])\s+/)[0] || text;
+  const trimmed = firstSentence.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}…`;
+}
+
+// 2026-09-05(4) 추가: 프롬프트/스키마를 바꿀 때마다 값을 올린다. 이미 저장된
+// 문서의 ai_summary_prompt_version이 이 값보다 낮으면 "재요약이 필요한 문서"로
+// 다시 잡힌다(useStore.js getMissingAiSummaryCandidates 참고) — ai_summary가
+// 이미 있어도(예전 버전으로 채워진 것) 새 프롬프트로 다시 돌릴 수 있게 하려는
+// 목적. 버전 이력: 1=스키마 필드명 없음(항상 빈 요약), 2=필드명은 있지만 길이
+// 제약 없음(산문형, 너무 김), 3=25자 명사구 강제(너무 짧음), 4=40~60자 한 문장.
+export const PROMPT_VERSION = 4;
+
 function normalizeParsedDoc(data) {
   return {
     title: data?.title ?? "",
     sender_dept: data?.sender_dept ?? "",
     deadline: data?.deadline ?? null,
     requires_action: Boolean(data?.requires_action),
-    action_description: data?.action_description ?? null,
-    summary: data?.summary ?? "",
+    action_type: data?.action_type ?? null,
+    action_description: data?.action_description ? enforceShortText(data.action_description, ACTION_DESC_MAX_CHARS) : null,
+    summary: enforceShortText(data?.summary ?? "", SUMMARY_MAX_CHARS),
   };
 }

@@ -170,10 +170,34 @@ export default function CoopDetailModal({ docId }) {
           </div>
         </div>
 
-        {/* AI요약 바 (파란 배경) */}
+        {/* AI요약 바 (파란 배경) — 2026-09-05(2): action_type 배지 +
+            요약(이제 1~2문장으로 짧음) + 기한/조치사항 메타 줄을 추가해서
+            카드 목록과 동일한 정보 구조를 상세 팝업에서도 그대로 보여준다. */}
         {doc.ai_summary && (
-          <div className="bg-brand-alt border-b border-blue-100 p-4 text-sm text-blue-900 whitespace-pre-line">
-            {doc.ai_summary}
+          <div className="bg-brand-alt border-b border-blue-100 p-4 text-sm text-blue-900">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-[10px] font-bold tracking-wide text-brand-blue">✨ AI Summary</span>
+              {doc.action_type && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-blue text-white">
+                  {doc.action_type} 필요
+                </span>
+              )}
+            </div>
+            <p className="whitespace-pre-line">{doc.ai_summary}</p>
+            {(doc.deadline || doc.action_description) && (
+              <div className="mt-2 pt-2 border-t border-blue-100 flex flex-col gap-0.5 text-[13px]">
+                {doc.deadline && (
+                  <p>
+                    <span className="font-semibold">기한</span> {doc.deadline}
+                  </p>
+                )}
+                {doc.action_description && (
+                  <p>
+                    <span className="font-semibold">조치</span> {doc.action_description}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

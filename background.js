@@ -45,7 +45,7 @@ import {
   RAW_TEXT_EXTRACT_VERSION,
   RECV_DEPT_SCHEMA_VERSION,
 } from "../src/lib/kisApi.js";
-import { parseCoopDoc } from "../src/lib/claudeApi.js";
+import { parseCoopDoc, PROMPT_VERSION } from "../src/lib/claudeApi.js";
 import { fillParsedFallback } from "../src/lib/textUtils.js";
 
 const POLL_ALARM_NAME = "coopDocPoll";
@@ -911,6 +911,12 @@ function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVe
     body_unavailable: bodyUnavailable,
     raw_text_version: rawTextVersion,
     ai_summary: parsed?.summary || "",
+    // 2026-09-05(4) 추가: 이 요약이 어느 프롬프트 버전으로 만들어졌는지 기록.
+    // parsed가 없으면(AI 스킵/실패) null — useStore.js가 재요약 대상 판단에 씀.
+    ai_summary_prompt_version: parsed ? PROMPT_VERSION : null,
+    // 2026-09-05(2) 추가: "회신/제출/확인" 등 처리유형을 요약 본문과 분리된
+    // 필드로 저장 — CoopCard.jsx가 이 값으로 배지를 바로 보여준다.
+    action_type: parsed?.action_type ?? null,
     deadline: fallback.deadline,
     requires_action: fallback.requires_action,
     // 규칙 기반 값인지 AI 값인지 UI에서 구분하고 싶을 때 참고용 플래그

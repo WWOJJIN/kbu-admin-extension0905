@@ -296,16 +296,6 @@ async function getCoopDoc(id) {
   const db = await initDB();
   return db.get(STORE_COOP_DOCS, id);
 }
-async function getAllCoopDocs() {
-  const db = await initDB();
-  const all = await db.getAll(STORE_COOP_DOCS);
-  return all.sort((a, b) => {
-    const dateA = a.date || "";
-    const dateB = b.date || "";
-    if (dateA !== dateB) return dateB.localeCompare(dateA);
-    return (b.id || "").localeCompare(a.id || "");
-  });
-}
 async function getAllCoopDocIds() {
   const db = await initDB();
   const keys = await db.getAllKeys(STORE_COOP_DOCS);
@@ -400,7 +390,7 @@ async function getAiSummaryMaxAgeDays() {
 }
 async function getAutoDetailFetchOnArrival() {
   const v = await getMeta("autoDetailFetchOnArrival");
-  return v === true;
+  return v === void 0 || v === null ? true : v === true;
 }
 
 // src/lib/kisApi.js
@@ -930,16 +920,31 @@ function fetchCoopDocDetail({ aprvNo }) {
 var PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev";
 var PROXY_SECRET_HEADER = "x-proxy-secret";
 var PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
-var SYSTEM_PROMPT = [
-  "\uB300\uD559 \uD589\uC815 \uD611\uC870\uBB38 \uBD84\uC11D \uC5B4\uC2DC\uC2A4\uD134\uD2B8. JSON\uB9CC \uBC18\uD658. \uB2E4\uB978 \uD14D\uC2A4\uD2B8 \uC5C6\uC74C.",
-  "\uC544\uB798 6\uAC1C \uD0A4\uB97C \uC815\uD655\uD788 \uC774 \uC774\uB984 \uADF8\uB300\uB85C \uD3EC\uD568\uD55C JSON \uAC1D\uCCB4 \uD558\uB098\uB9CC \uBC18\uD658\uD558\uC138\uC694(\uB2E4\uB978 \uD0A4 \uCD94\uAC00 \uAE08\uC9C0):",
-  "- title (string): \uBB38\uC11C \uC81C\uBAA9",
-  "- sender_dept (string): \uBC1C\uC2E0 \uBD80\uC11C\uBA85",
-  '- deadline (string \uB610\uB294 null): \uB9C8\uAC10\uAE30\uD55C. \uBC18\uB4DC\uC2DC "YYYY-MM-DD" \uD615\uC2DD, \uAE30\uD55C\uC774 \uBA85\uC2DC \uC548 \uB410\uC73C\uBA74 null',
-  "- requires_action (boolean): \uC218\uC2E0\uC790\uAC00 \uD68C\uC2E0/\uC81C\uCD9C/\uC870\uCE58\uB97C \uD574\uC57C \uD558\uB294 \uBB38\uC11C\uC778\uC9C0",
-  "- action_description (string \uB610\uB294 null): \uD544\uC694\uD55C \uC870\uCE58 \uB0B4\uC6A9 \uD55C \uC904 \uC124\uBA85, \uC5C6\uC73C\uBA74 null",
-  "- summary (string): \uBB38\uC11C \uD575\uC2EC \uB0B4\uC6A9 \uC694\uC57D. \uBC18\uB4DC\uC2DC 3\uC904 \uC774\uB0B4(\uC904\uBC14\uAFC8 \uCD5C\uB300 2\uBC88)\uB85C, \uAC01 \uC904\uC740 \uACF5\uBC31 \uD3EC\uD568 40\uC790 \uC774\uB0B4\uB85C \uAC04\uACB0\uD558\uAC8C \uC791\uC131. 3\uC904\uC744 \uB118\uAE30\uAC70\uB098 \uC7A5\uD669\uD558\uAC8C \uD480\uC5B4 \uC4F0\uC9C0 \uB9D0 \uAC83."
-].join("\n");
+var SYSTEM_PROMPT = `\uB2F9\uC2E0\uC740 \uB300\uD559 \uD589\uC815 \uD611\uC870\uBB38\uC744 \uBD84\uC11D\uD558\uB294 \uC5B4\uC2DC\uC2A4\uD134\uD2B8\uC785\uB2C8\uB2E4.
+\uC0AC\uC6A9\uC790\uAC00 \uBCF4\uB0B8 \uD611\uC870\uBB38 \uC6D0\uBB38\uC744 \uBD84\uC11D\uD574\uC11C, \uC544\uB798 7\uAC1C \uD544\uB4DC\uB85C\uB9CC \uAD6C\uC131\uB41C JSON \uAC1D\uCCB4 \uD558\uB098\uB97C
+\uBC18\uD658\uD558\uC138\uC694. \uCF54\uB4DC\uD39C\uC2A4\uB098 \uC124\uBA85 \uBB38\uC7A5 \uC5C6\uC774 JSON \uAC1D\uCCB4\uB9CC \uBC18\uD658\uD569\uB2C8\uB2E4.
+
+{
+  "title": "\uBB38\uC11C \uC81C\uBAA9 (string)",
+  "sender_dept": "\uBC1C\uC2E0 \uBD80\uC11C\uBA85 (string, \uC6D0\uBB38\uC5D0\uC11C \uCC3E\uC744 \uC218 \uC5C6\uC73C\uBA74 \uBE48 \uBB38\uC790\uC5F4)",
+  "deadline": "\uB9C8\uAC10\uAE30\uD55C, YYYY-MM-DD \uD615\uC2DD\uC758 \uBB38\uC790\uC5F4. \uBA85\uC2DC\uB41C \uB9C8\uAC10\uC77C\uC774 \uC5C6\uC73C\uBA74 null (\uBB38\uC790\uC5F4 \uC544\uB2D8)",
+  "requires_action": "\uC870\uAD50/\uB2F4\uB2F9\uC790\uAC00 \uC2E4\uC81C\uB85C \uCC98\uB9AC\uD574\uC57C \uD560 \uC77C\uC774 \uC788\uC73C\uBA74 true, \uB2E8\uC21C \uD1B5\uBCF4/\uCC38\uACE0\uC6A9\uC774\uBA74 false (boolean)",
+  "action_type": "requires_action\uC774 true\uC77C \uB54C, \uD574\uC57C \uD560 \uD589\uB3D9\uC744 \uB2E4\uC74C \uC911 \uD558\uB098\uC758 \uC9E7\uC740 \uD55C\uAD6D\uC5B4 \uB2E8\uC5B4\uB85C: \uD68C\uC2E0, \uC81C\uCD9C, \uD655\uC778, \uCC38\uC11D, \uACB0\uC7AC, \uC2E0\uCCAD, \uAE30\uD0C0. requires_action\uC774 false\uBA74 null",
+  "action_description": "requires_action\uC774 true\uC77C \uB54C, \uC815\uD655\uD788 \uBB34\uC5C7\uC744 \uB204\uAD6C\uC5D0\uAC8C/\uC5B4\uB514\uB85C \uC81C\uCD9C\xB7\uD68C\uC2E0\uD574\uC57C \uD558\uB294\uC9C0 15~25\uC790 \uC815\uB3C4\uB85C \uC9E7\uAC8C. requires_action\uC774 false\uBA74 null",
+  "summary": "\uBB38\uC11C \uC6A9\uAC74\uC744 \uC790\uC5F0\uC2A4\uB7EC\uC6B4 \uD55C \uBB38\uC7A5, 40~60\uC790 \uC815\uB3C4\uB85C \uC694\uC57D. \uC544\uB798 \uC608\uC2DC\uC758 '\uC88B\uC740 \uC608' \uAE38\uC774/\uD1A4\uC744 \uBC18\uB4DC\uC2DC \uB530\uB97C \uAC83"
+}
+
+summary \uC791\uC131 \uC608\uC2DC (\uBC18\uB4DC\uC2DC \uC774 \uC815\uB3C4 \uAE38\uC774/\uD1A4\uC744 \uB530\uB97C \uAC83):
+- \uB098\uC05C \uC608(\uB108\uBB34 \uAE40): "\uAD6D\uBBFC\uCDE8\uC5C5\uC9C0\uC6D0\uC81C\uB3C4 \uC548\uB0B4\uB97C \uC704\uD574 2026\uB144 9\uC6D4\uBD80\uD130 12\uC6D4\uAE4C\uC9C0 \uD559\uACFC\uC0AC\uBB34\uC2E4\uC744 \uBC29\uBB38\uD558\uB294 \uC124\uBA85\uD68C\uB97C \uC6B4\uC601\uD569\uB2C8\uB2E4. \uD559\uACFC\uB294 \uC704\uD0C1\uAE30\uAD00 \uB2F4\uB2F9\uC790\uC758 \uBC29\uBB38\uC5D0 \uD611\uC870\uD558\uACE0 \uD64D\uBCF4\uBB3C\uC744 \uAC8C\uC2DC\uD574\uC57C \uD558\uBA70, \uD559\uACFC \uB9DE\uCDA4\uD615 \uC124\uBA85\uD68C \uC77C\uC815\uC744 \uD611\uC758\uD574\uC57C \uD569\uB2C8\uB2E4."
+- \uB098\uC05C \uC608(\uB108\uBB34 \uC9E7\uC74C, \uBB38\uC7A5\uC774 \uC544\uB2C8\uB77C \uBA85\uC0AC\uAD6C\uB9CC): "\uAD6D\uBBFC\uCDE8\uC5C5\uC9C0\uC6D0\uC81C\uB3C4 \uC124\uBA85\uD68C \uBC29\uBB38 \uD611\uC870 \uC694\uCCAD"
+- \uC88B\uC740 \uC608(\uB531 \uC801\uB2F9\uD568): "\uAD6D\uBBFC\uCDE8\uC5C5\uC9C0\uC6D0\uC81C\uB3C4 \uC124\uBA85\uD68C\uB97C \uC704\uD574 \uD559\uACFC\uC0AC\uBB34\uC2E4 \uBC29\uBB38 \uD611\uC870\uC640 \uC77C\uC815 \uD611\uC758\uB97C \uC694\uCCAD\uD558\uB294 \uC548\uB0B4\uC785\uB2C8\uB2E4."
+- \uB098\uC05C \uC608(\uB108\uBB34 \uAE40): "2026\uB144 9\uC6D4 7\uC77C\uBD80\uD130 11\uC6D4 2\uC77C\uAE4C\uC9C0 \uAD11\uB989\uD14C\uD06C\uB178\uBC38\uB9AC \uC0B0\uC5C5\uB2E8\uC9C0\uC5D0\uC11C \uC9C4\uD589\uB418\uB294 AI \uC9C1\uBB34\uAD50\uC721\uC744 \uC704\uD574 \uC18C\uD504\uD2B8\uC6E8\uC5B4\uC735\uD569\uD559\uACFC \uACF5\uC6A9\uC7A5\uBE44 \uB178\uD2B8\uBD81 10\uB300\uB97C \uB300\uC5EC\uD569\uB2C8\uB2E4. \uAD50\uC721 \uB2F4\uB2F9\uC790\uAC00 \uC7A5\uBE44\uB97C \uAD00\uB9AC\uD558\uACE0 \uAD50\uC721 \uC885\uB8CC \uD6C4 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC5EC \uC77C\uAD04 \uBC18\uB0A9\uD574\uC57C \uD569\uB2C8\uB2E4."
+- \uB098\uC05C \uC608(\uB108\uBB34 \uC9E7\uC74C): "AI \uC9C1\uBB34\uAD50\uC721\uC6A9 \uB178\uD2B8\uBD81 10\uB300 \uB300\uC5EC \uD611\uC870"
+- \uC88B\uC740 \uC608(\uB531 \uC801\uB2F9\uD568): "AI \uC9C1\uBB34\uAD50\uC721\uC5D0 \uD544\uC694\uD55C \uACF5\uC6A9 \uB178\uD2B8\uBD81 10\uB300\uB97C \uB300\uC5EC\uD558\uB2C8 \uB2F4\uB2F9\uC790\uAC00 \uAD00\uB9AC\uD574\uB2EC\uB77C\uB294 \uC694\uCCAD\uC785\uB2C8\uB2E4."
+
+summary\uB294 \uBC30\uACBD \uC124\uBA85\xB7\uC138\uBD80 \uC808\uCC28\uB97C \uB298\uC5B4\uB193\uC9C0 \uB9D0\uACE0 \uD575\uC2EC \uC6A9\uAC74 \uD558\uB098\uB9CC \uC790\uC5F0\uC2A4\uB7EC\uC6B4 \uBB38\uC7A5\uC73C\uB85C
+\uC4F0\uB418, \uBA85\uC0AC\uAD6C\uB85C \uB69D \uB04A\uC9C0 \uB9D0\uACE0 "~\uC694\uCCAD\uC785\uB2C8\uB2E4/~\uC548\uB0B4\uC785\uB2C8\uB2E4"\uCC98\uB7FC \uBB38\uC7A5\uC73C\uB85C \uB05D\uB9FA\uC73C\uC138\uC694.
+\uB450 \uBB38\uC7A5 \uC774\uC0C1 \uC4F0\uC9C0 \uB9C8\uC138\uC694.`;
 async function parseCoopDoc(rawText, aprvNo) {
   if (!PROXY_URL) {
     throw new Error(
@@ -976,14 +981,25 @@ async function callProxyWithRetry(rawText, aprvNo, retries) {
     throw err;
   }
 }
+var SUMMARY_MAX_CHARS = 70;
+var ACTION_DESC_MAX_CHARS = 35;
+function enforceShortText(text, maxChars) {
+  if (!text) return "";
+  const firstSentence = text.split(/(?<=[.!?다요함음])\s+/)[0] || text;
+  const trimmed = firstSentence.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}\u2026`;
+}
+var PROMPT_VERSION = 4;
 function normalizeParsedDoc(data) {
   return {
     title: data?.title ?? "",
     sender_dept: data?.sender_dept ?? "",
     deadline: data?.deadline ?? null,
     requires_action: Boolean(data?.requires_action),
-    action_description: data?.action_description ?? null,
-    summary: data?.summary ?? ""
+    action_type: data?.action_type ?? null,
+    action_description: data?.action_description ? enforceShortText(data.action_description, ACTION_DESC_MAX_CHARS) : null,
+    summary: enforceShortText(data?.summary ?? "", SUMMARY_MAX_CHARS)
   };
 }
 
@@ -1039,40 +1055,10 @@ chrome.runtime.onInstalled.addListener(() => {
   pollCoopDocs();
   pollApprovalStatus();
   pollStatusChanges();
-  migrateStaleAiSummariesOnce();
 });
 chrome.runtime.onStartup.addListener(() => {
   setupAlarm();
-  migrateStaleAiSummariesOnce();
 });
-var AI_SUMMARY_MIGRATION_KEY = "ai_summary_migration_20260905_promptHashFix_done";
-async function migrateStaleAiSummariesOnce() {
-  try {
-    const done = await getMeta(AI_SUMMARY_MIGRATION_KEY);
-    if (done) return;
-    const docs = await getAllCoopDocs();
-    const targets = docs.filter((d) => d.raw_text && d.raw_text.trim() && !d.body_unavailable);
-    console.log(`[migration] AI \uC694\uC57D \uC7AC\uC0DD\uC131 \uC2DC\uC791 (\uD504\uB86C\uD504\uD2B8 \uC218\uC815 \uBC18\uC601): \uB300\uC0C1 ${targets.length}\uAC74`);
-    for (const doc of targets) {
-      try {
-        const parsed = await parseCoopDoc(doc.raw_text, doc.id);
-        await upsertCoopDoc({
-          ...doc,
-          ai_summary: parsed.summary || doc.ai_summary,
-          deadline: parsed.deadline ?? doc.deadline,
-          requires_action: typeof parsed.requires_action === "boolean" ? parsed.requires_action : doc.requires_action,
-          action_description: parsed.action_description ?? doc.action_description
-        });
-      } catch (err) {
-        console.warn(`[migration] \uBB38\uC11C \uC7AC\uD30C\uC2F1 \uC2E4\uD328 (id=${doc.id}):`, err);
-      }
-    }
-    await setMeta(AI_SUMMARY_MIGRATION_KEY, true);
-    console.log("[migration] AI \uC694\uC57D \uC7AC\uC0DD\uC131 \uC644\uB8CC");
-  } catch (err) {
-    console.warn("[migration] \uB9C8\uC774\uADF8\uB808\uC774\uC158 \uC790\uCCB4 \uC2E4\uD328:", err);
-  }
-}
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM_NAME) {
     pollCoopDocs();
@@ -1591,6 +1577,12 @@ function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVe
     body_unavailable: bodyUnavailable,
     raw_text_version: rawTextVersion,
     ai_summary: parsed?.summary || "",
+    // 2026-09-05(4) 추가: 이 요약이 어느 프롬프트 버전으로 만들어졌는지 기록.
+    // parsed가 없으면(AI 스킵/실패) null — useStore.js가 재요약 대상 판단에 씀.
+    ai_summary_prompt_version: parsed ? PROMPT_VERSION : null,
+    // 2026-09-05(2) 추가: "회신/제출/확인" 등 처리유형을 요약 본문과 분리된
+    // 필드로 저장 — CoopCard.jsx가 이 값으로 배지를 바로 보여준다.
+    action_type: parsed?.action_type ?? null,
     deadline: fallback.deadline,
     requires_action: fallback.requires_action,
     // 규칙 기반 값인지 AI 값인지 UI에서 구분하고 싶을 때 참고용 플래그
