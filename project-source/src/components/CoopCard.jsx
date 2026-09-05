@@ -259,15 +259,13 @@ export default function CoopCard({ doc, onClick, expanded = true }) {
             전부 없애서 내용이 항상 끝까지 다 보이게 함. */}
         {expanded && (
           <div className="px-3 py-2.5">
-            <div
-              className={`text-[12px] leading-[1.5] whitespace-pre-line ${
-                isRealAiSummary ? "text-[#3D57E8]" : "text-[#6B7280]"
-              }`}
-            >
-              {summaryText || "요약 불가"}
-            </div>
+            {/* 2026-09-05(6): "요약이 밑으로, 기한/조치가 위로" 요청 — 카드를
+                열자마자 "언제까지 뭘 해야 하는지"부터 보이게 순서를 뒤집음
+                (preview_order_swap.html에서 미리 봤던 순서). 구분선은 이제
+                메타 블록 밑(border-bottom)에 붙고, 요약 문단 쪽엔 위쪽 여백만
+                살짝 줘서 메타 블록과 시각적으로 분리. */}
             {isRealAiSummary && (doc.deadline || doc.action_description) && (
-              <div className="mt-1.5 pt-1.5 border-t border-[#E4E7F2] flex flex-col gap-1">
+              <div className="pb-1.5 mb-1.5 border-b border-[#E4E7F2] flex flex-col gap-1">
                 {doc.deadline && (
                   <p className="text-[11px] text-[#4B5563] leading-[1.4]">
                     <span className="font-semibold text-[#3D57E8]">기한</span> {doc.deadline}
@@ -280,6 +278,13 @@ export default function CoopCard({ doc, onClick, expanded = true }) {
                 )}
               </div>
             )}
+            <div
+              className={`text-[12px] leading-[1.5] whitespace-pre-line ${
+                isRealAiSummary ? "text-[#3D57E8]" : "text-[#6B7280]"
+              }`}
+            >
+              {summaryText || "요약 불가"}
+            </div>
           </div>
         )}
         </div>

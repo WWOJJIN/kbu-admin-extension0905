@@ -206,8 +206,9 @@ export default function CoopPage() {
       ) : (
         // 2026-09-05: 타임라인형을 한 번 적용했다가, "타임라인 없이 지금 카드
         // 모양 유지해서 2열로 해줄 수 있어?" 요청으로 다시 카드 그리드로 원복.
-        // 이전 그리드는 lg 이상에서 3열이었는데, 이번엔 2열로 고정.
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+        // 이후 "한줄에 3개 들어가게 해줘" 요청으로 데스크톱 기준 3열로 재조정
+        // (모바일 1열 → 태블릿 2열 → 데스크톱 3열).
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
           {pageDocs.map((doc) => (
             <CoopCard
               key={doc.id}

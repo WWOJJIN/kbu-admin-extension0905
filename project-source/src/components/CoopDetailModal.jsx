@@ -183,9 +183,11 @@ export default function CoopDetailModal({ docId }) {
                 </span>
               )}
             </div>
-            <p className="whitespace-pre-line">{doc.ai_summary}</p>
+            {/* 2026-09-05(6): 카드(CoopCard.jsx)와 동일하게 "요약이 밑으로,
+                기한/조치가 위로" 순서로 맞춤 — 팝업을 열자마자 언제까지 뭘
+                해야 하는지부터 보이게 함. 구분선은 메타 블록 밑으로 이동. */}
             {(doc.deadline || doc.action_description) && (
-              <div className="mt-2 pt-2 border-t border-blue-100 flex flex-col gap-0.5 text-[13px]">
+              <div className="pb-2 mb-2 border-b border-blue-100 flex flex-col gap-0.5 text-[13px]">
                 {doc.deadline && (
                   <p>
                     <span className="font-semibold">기한</span> {doc.deadline}
@@ -198,6 +200,7 @@ export default function CoopDetailModal({ docId }) {
                 )}
               </div>
             )}
+            <p className="whitespace-pre-line">{doc.ai_summary}</p>
           </div>
         )}
 
