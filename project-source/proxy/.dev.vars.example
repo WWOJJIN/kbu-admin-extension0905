@@ -1,0 +1,7 @@
+# wrangler dev(로컬 개발 서버) 실행 시 이 파일을 복사해서 .dev.vars로 만들고 실제 값을 채운다.
+# .dev.vars는 .gitignore에 이미 등록되어 있어 git에는 올라가지 않는다.
+# 실제 배포(Cloudflare 대시보드)에는 이 파일이 아니라 Settings > Variables and Secrets에서
+# 동일한 이름으로 "Encrypt" 등록해야 한다.
+
+ANTHROPIC_API_KEY=sk-ant-여기에_실제_키_입력
+PROXY_SECRET=여기에_임의의_긴_문자열_입력

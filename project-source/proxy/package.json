@@ -1,0 +1,13 @@
+{
+  "name": "kbu-admin-proxy",
+  "private": true,
+  "version": "0.1.0",
+  "description": "협조문 파싱용 Claude API 프록시 (Cloudflare Worker) — src/lib/claudeApi.js가 이 서버를 경유해서만 Claude API를 호출한다.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

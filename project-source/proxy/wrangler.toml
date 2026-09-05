@@ -1,0 +1,12 @@
+name = "kbu-admin-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-05"
+
+[observability]
+enabled = true
+
+# 실제 비밀값(ANTHROPIC_API_KEY, PROXY_SECRET)은 여기 넣지 않는다.
+# `wrangler secret put ANTHROPIC_API_KEY` / `wrangler secret put PROXY_SECRET`
+# 로 등록하거나(CLI 배포 시), Cloudflare 대시보드 Worker 설정의
+# Settings > Variables and Secrets 에서 "Encrypt" 옵션으로 등록한다(대시보드
+# 수동 배포 시 — 이 프로젝트는 CLI가 아니라 이 방식으로 배포했다. proxy/README.md 참고).

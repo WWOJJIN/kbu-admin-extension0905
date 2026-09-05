@@ -3,14 +3,17 @@
 // (코딩 규칙: api.anthropic.com 직접 호출 금지, API 키를 확장 코드/manifest에 절대
 // 포함하지 않음 — Claude API 호출은 이 파일에서만 수행)
 //
-// ⚠️ 2026-08-08 기준 프록시 서버(Cloudflare Worker, proxy/)는 아직 배포 전이다
-// (재료비/예산 승인 대기 중이라 보류). PROXY_URL이 비어있는 동안 parseCoopDoc()은
-// 명확한 에러를 던지도록 해뒀다. 프록시 배포되면 PROXY_URL/PROXY_SECRET만 채우면
-// 나머지 코드는 그대로 동작함.
+// ⚠️ 2026-09-05: 프록시 서버(Cloudflare Worker) 코드는 project-source/proxy/에
+// 작성 완료. 배포는 proxy/README.md 절차(Cloudflare 대시보드 수동 배포 — 이 세션
+// 환경에서 wrangler CLI가 Cloudflare API에 못 붙어서 대시보드 방식으로 진행)를
+// 따를 것. 배포 후 아래 PROXY_URL만 실제 workers.dev 주소로 채우면 나머지 코드는
+// 그대로 동작함. PROXY_SECRET은 proxy/.dev.vars 및 Cloudflare 대시보드 시크릿과
+// 반드시 동일한 값으로 이미 채워둠(2026-09-05 생성) — 값을 바꾸려면 세 군데
+// (여기, proxy/.dev.vars, Cloudflare 대시보드 시크릿)를 같이 바꿔야 함.
 
-const PROXY_URL = ""; // TODO: 프록시 배포 후 채울 것 (예: https://xxx.workers.dev/parse)
+const PROXY_URL = ""; // TODO: Cloudflare Worker 배포 후 실제 URL로 채울 것 (proxy/README.md 참고)
 const PROXY_SECRET_HEADER = "x-proxy-secret";
-const PROXY_SECRET = ""; // TODO: wrangler secret으로 등록한 값과 맞춰서 채울 것
+const PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 
 const SYSTEM_PROMPT = "대학 행정 협조문 분석 어시스턴트. JSON만 반환. 다른 텍스트 없음.";
 
