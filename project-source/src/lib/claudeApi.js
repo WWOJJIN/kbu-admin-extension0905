@@ -15,7 +15,16 @@ const PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev"; // 2026-09-05 
 const PROXY_SECRET_HEADER = "x-proxy-secret";
 const PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 
-const SYSTEM_PROMPT = "대학 행정 협조문 분석 어시스턴트. JSON만 반환. 다른 텍스트 없음.";
+const SYSTEM_PROMPT = [
+  "대학 행정 협조문 분석 어시스턴트. JSON만 반환. 다른 텍스트 없음.",
+  "아래 6개 키를 정확히 이 이름 그대로 포함한 JSON 객체 하나만 반환하세요(다른 키 추가 금지):",
+  '- title (string): 문서 제목',
+  '- sender_dept (string): 발신 부서명',
+  '- deadline (string 또는 null): 마감기한. 반드시 "YYYY-MM-DD" 형식, 기한이 명시 안 됐으면 null',
+  '- requires_action (boolean): 수신자가 회신/제출/조치를 해야 하는 문서인지',
+  '- action_description (string 또는 null): 필요한 조치 내용 한 줄 설명, 없으면 null',
+  '- summary (string): 문서 핵심 내용 요약. 반드시 3줄 이내(줄바꿈 최대 2번)로, 각 줄은 공백 포함 40자 이내로 간결하게 작성. 3줄을 넘기거나 장황하게 풀어 쓰지 말 것.',
+].join("\n");
 
 /**
  * @typedef {Object} ParsedCoopDoc
