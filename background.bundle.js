@@ -853,9 +853,9 @@ function fetchCoopDocDetail({ aprvNo }) {
 }
 
 // src/lib/claudeApi.js
-var PROXY_URL = "";
+var PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev";
 var PROXY_SECRET_HEADER = "x-proxy-secret";
-var PROXY_SECRET = "";
+var PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 var SYSTEM_PROMPT = "\uB300\uD559 \uD589\uC815 \uD611\uC870\uBB38 \uBD84\uC11D \uC5B4\uC2DC\uC2A4\uD134\uD2B8. JSON\uB9CC \uBC18\uD658. \uB2E4\uB978 \uD14D\uC2A4\uD2B8 \uC5C6\uC74C.";
 async function parseCoopDoc(rawText) {
   if (!PROXY_URL) {
