@@ -1,10 +1,10 @@
 // project-source/proxy/src/index.js
 // KBU 행정 어시스턴트 — 협조문 파싱 프록시 (Cloudflare Worker)
 //
-// 역할: Chrome 확장(src/lib/claudeApi.js)이 보낸 { model, system, text }를 받아
-// 이 Worker가 대신 Anthropic Claude API를 호출하고, 결과를 ParsedCoopDoc 스키마
-// (title/sender_dept/deadline/requires_action/action_description/summary) 그대로
-// JSON으로 돌려준다. 실제 ANTHROPIC_API_KEY는 이 Worker의 비밀 환경변수로만
+// 역할: Chrome 확장(src/lib/claudeApi.js)이 보낸 { model, system, text, doc_id }를
+// 받아 이 Worker가 대신 Anthropic Claude API를 호출하고, 결과를 ParsedCoopDoc
+// 스키마(title/sender_dept/deadline/requires_action/action_description/summary)
+// 그대로 JSON으로 돌려준다. 실제 ANTHROPIC_API_KEY는 이 Worker의 비밀 환경변수로만
 // 존재하고 확장 코드/manifest에는 절대 들어가지 않는다(코딩 규칙 준수 — api.anthropic.com
 // 직접 호출 금지는 "확장에서"라는 뜻이고, 이 프록시 자체가 그 호출을 대신 해주는 역할).
 //
@@ -12,11 +12,24 @@
 // 인증은 아니고(확장 번들 JS 안에 평문으로 들어있는 값이라 완전한 비밀은 아님),
 // 아무나 이 엔드포인트를 두드려 Claude API 비용을 발생시키는 걸 막는 최소한의
 // 게이트 역할만 한다.
+//
+// 2026-09-05 추가: doc_id 기반 캐싱. 같은 협조문을 여러 직원(=여러 확장 인스턴스)
+// 이 각자 폴링해서 각자 파싱하면 학교 전체 기준으로 같은 문서를 N번 파싱하게 되는
+// 문제가 있었음(team_plan_summary.docx 6절에서 이미 예상했던 비용 문제). doc_id
+// (=ERP aprvNo, 문서마다 고유)를 캐시 키로 써서, 이미 파싱한 문서면 Claude API를
+// 다시 안 부르고 캐시된 결과를 그대로 돌려준다. KV 네임스페이스 같은 별도 프로비저닝
+// 없이 모든 Worker에 기본 제공되는 Cache API(caches.default)를 사용 — 캐시 키를
+// 그 자체로 유효한 요청 URL처럼 만들어야 해서, 실제로 호출되지 않는 내부 전용
+// 가짜 URL(https://cache.internal/parsed-doc/{doc_id})을 캐시 키로만 사용한다.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_OUTPUT_TOKENS = 1024;
 const DEFAULT_MODEL = "claude-haiku-4-5";
+// 캐시 보관 기간. 협조문 내용은 한 번 등록되면 안 바뀌는 게 보통이라 길게 잡아도
+// 안전함 — 상태(stGbn) 변경은 별도 로직(handleChangedCoopDoc)이 처리하고, 이 캐시는
+// "본문 텍스트 → 파싱 결과" 매핑만 담당한다.
+const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30일
 
 const CORS_HEADERS = {
   // 확장 백그라운드(service worker)에서 fetch할 때 manifest.json host_permissions에
@@ -28,7 +41,7 @@ const CORS_HEADERS = {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -49,7 +62,7 @@ export default {
       return jsonResponse({ error: "잘못된 JSON 요청 본문" }, 400);
     }
 
-    const { model, system, text } = body || {};
+    const { model, system, text, doc_id: docId } = body || {};
     if (!text || typeof text !== "string") {
       return jsonResponse({ error: "text 필드(문자열)가 필요합니다." }, 400);
     }
@@ -61,6 +74,18 @@ export default {
       );
     }
 
+    // doc_id가 왔으면 캐시부터 확인 — 같은 문서를 다른 직원이 먼저 파싱해뒀으면
+    // Claude API를 아예 안 부르고 그 결과를 그대로 돌려준다.
+    const cache = caches.default;
+    const cacheKey = docId ? buildCacheKey(docId) : null;
+    if (cacheKey) {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const cachedBody = await cached.json();
+        return jsonResponse({ ...cachedBody, _cache: "hit" }, 200);
+      }
+    }
+
     try {
       const parsed = await callClaude({
         apiKey: env.ANTHROPIC_API_KEY,
@@ -68,13 +93,36 @@ export default {
         system: system || "JSON만 반환하세요.",
         text,
       });
-      return jsonResponse(parsed, 200);
+
+      // 캐시 저장은 응답을 늦추지 않도록 ctx.waitUntil로 백그라운드 처리.
+      if (cacheKey) {
+        const cacheResponse = new Response(JSON.stringify(parsed), {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": `max-age=${CACHE_TTL_SECONDS}`,
+          },
+        });
+        ctx.waitUntil(cache.put(cacheKey, cacheResponse));
+      }
+
+      return jsonResponse({ ...parsed, _cache: "miss" }, 200);
     } catch (err) {
       console.error("[proxy] Claude 호출/파싱 실패:", err);
       return jsonResponse({ error: String(err?.message || err) }, 502);
     }
   },
 };
+
+/**
+ * doc_id를 Cache API가 요구하는 Request 키(유효한 URL 형태)로 변환한다.
+ * 실제로 이 URL로 네트워크 요청이 나가지는 않음 — 캐시 매칭 전용 키일 뿐.
+ * @param {string} docId
+ * @returns {Request}
+ */
+function buildCacheKey(docId) {
+  const safeId = encodeURIComponent(String(docId));
+  return new Request(`https://cache.internal/parsed-doc/${safeId}`);
+}
 
 /**
  * Anthropic Messages API를 호출하고, 응답 텍스트에서 JSON을 뽑아 반환한다.

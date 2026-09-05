@@ -232,6 +232,20 @@ export const ENDPOINTS = {
     menuId: "M104947",
     pgmId: "P005858",
   },
+  // 2026-09-05 실측 완료 — 로그인 계정이 실제로 권한을 가진 메뉴 전체 목록.
+  // isLogin/userGbList와 마찬가지로 menuId=M000000/pgmId=P000000인 공통 화면
+  // (특정 업무 메뉴가 아니라 프레임워크 부트스트랩 영역). 응답 Dataset
+  // "DS_MENULIST"에 menuId 컬럼이 있고, 이 목록에 없는 menuId는 그 계정이
+  // ERP 메뉴로는 절대 들어갈 수 없는 화면이라는 뜻 — 즉 ERP가 하는 메뉴 권한
+  // 검사를 그대로 재현할 수 있음. 실측: 권한 없는 계정(W) 응답엔 학적변동승인처리
+  // (M104947)가 없고, 권한 있는 계정 응답엔 있음 — 대조 확인 완료.
+  // ⚠️ Content-Type/헤더가 postDataset과 달라서(text/plain + Reqfoundataion:
+  // nexacro) postParamsOnly로 호출해야 함(findAttachDocList.do와 동일 패턴).
+  authMenuList: {
+    path: "/com/MenuCtr/findAuthMenuList.do",
+    menuId: "M000000",
+    pgmId: "P000000",
+  },
 };
 
 /**
@@ -1134,6 +1148,22 @@ export async function fetchLoginUserGbInfo() {
   const rows = await postDataset(ENDPOINTS.userGbList, "DS_COND", {}, undefined, "DS_USER_GB");
   const current = rows.find((r) => r.currentLoginUser === "1") || rows[0];
   return current?.userGbnNm || null;
+}
+
+/**
+ * 로그인 계정이 실제로 ERP 메뉴 권한을 가진 menuId 전체 집합.
+ * ERP의 메뉴 트리 권한 검사를 그대로 재현하기 위한 함수 — 특정 menuId가
+ * 이 집합에 없으면, 그 화면은 이 계정으로 ERP 메뉴를 통해서는 절대
+ * 들어갈 수 없는 화면이라는 뜻이다. 학적변동승인처리(M104947)처럼 우리가
+ * background.js에서 API를 "직접" 호출하는 화면은, 메뉴를 거치지 않기
+ * 때문에 이 검사 없이는 권한이 없어도 조회가 그냥 성공해버린다 — 그래서
+ * 이런 화면을 폴링하기 전엔 반드시 이 함수로 먼저 확인해야 한다.
+ * (2026-09-05 실측 완료 — 권한 없는 계정과 있는 계정 응답 대조 확인됨)
+ * @returns {Promise<Set<string>>}
+ */
+export async function fetchAuthMenuIds() {
+  const rows = await postParamsOnly(ENDPOINTS.authMenuList, {}, "DS_MENULIST");
+  return new Set(rows.map((r) => r.menuId).filter(Boolean));
 }
 
 /**

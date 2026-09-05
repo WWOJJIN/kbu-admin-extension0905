@@ -703,6 +703,36 @@ export async function setMeta(key, value) {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// "최초 동기화(베이스라인)" 여부 — 2026-09-05 추가.
+// 문제: pollCoopDocs/pollApprovalStatus/pollStatusChanges 모두 "새 항목인지"를
+// IndexedDB에 저장된 적 있는지로만 판단한다. 그런데 최초 설치 직후, 또는
+// 브라우저 데이터 삭제 후 다시 동기화될 때는 IndexedDB가 비어있을 뿐이지
+// ERP에 실제로 새로 생긴 문서가 아니다 — 그런데도 "저장된 적 없음" =
+// "새 문서"로 오판해서, 이미 몇 달 전부터 쌓여있던 문서 전부에 대해 알림이
+// 한꺼번에 쏟아지는 문제가 실사용 중 발견됨(정확히는 "이미 받은 알림이
+// 계속 새로 뜬다"는 리포트).
+// 해결: 데이터 종류별(coop/approval/statusChange)로 "이 브라우저에서 최초
+// 동기화를 이미 한 번 완료했는지"를 별도로 기록해서, 완료 전이면 그 회차의
+// 항목은 전부 저장만 하고 알림은 건너뛴다(baseline 저장). 완료 후부터는
+// 평소대로 새 항목 = 알림.
+const SYNC_BASELINE_PREFIX = "syncBaselineDone:";
+
+/**
+ * @param {"coop"|"approval"|"statusChange"} key
+ * @returns {Promise<boolean>}
+ */
+export async function getSyncBaselineDone(key) {
+  return Boolean(await getMeta(`${SYNC_BASELINE_PREFIX}${key}`));
+}
+
+/**
+ * @param {"coop"|"approval"|"statusChange"} key
+ */
+export async function setSyncBaselineDone(key) {
+  return setMeta(`${SYNC_BASELINE_PREFIX}${key}`, true);
+}
+
 /**
  * 겸직 사용자용 수동 부서 코드 목록.
  * [{ label: "소프트웨어융합과", code: "30901015" }, ...]
@@ -769,6 +799,55 @@ export async function setFeatureEnabled(id, enabled) {
   cur[id] = !!enabled;
   await setMeta("featureToggles", cur);
   return cur;
+}
+
+// ---------------------------------------------------------------------------
+// AI(Claude API) 요약 사용 여부 — 2026-09-05 추가.
+// 위 featureToggles(coop/archive/status 등)는 "탭을 보여줄지"를 결정하고,
+// 이 설정은 그와 별개로 "Claude API를 아예 호출할지"만 딱 하나 결정한다.
+// 예를 들어 coop 탭은 계속 켜둔 채로 이 값만 꺼도, background.js는
+// parseCoopDoc(Claude API 호출)을 건너뛰고 규칙기반 폴백(fillParsedFallback)
+// 만 써서 원문/마감일 후보/할 일 여부는 그대로 보여준다 — 다만 AI 3줄
+// 요약만 빠진다. API 키가 발급된 뒤로 실제 비용이 발생하기 시작하므로,
+// 사용량이 걱정될 때 설정 탭에서 바로 끌 수 있는 스위치가 필요해서 추가.
+// 기본값 true(켜짐) — 프록시 배포 전까지는 어차피 parseCoopDoc이 에러를
+// 던지고 폴백으로 넘어가므로 기본값을 켜둬도 안전함.
+export async function getAiSummaryEnabled() {
+  const v = await getMeta("aiSummaryEnabled");
+  return v === undefined || v === null ? true : Boolean(v);
+}
+
+/**
+ * @param {boolean} enabled
+ */
+export async function setAiSummaryEnabled(enabled) {
+  return setMeta("aiSummaryEnabled", !!enabled);
+}
+
+// ---------------------------------------------------------------------------
+// AI 요약 대상 문서의 최대 나이(일) — 2026-09-05 추가.
+// 위 aiSummaryEnabled가 "AI 요약을 아예 쓸지"를 정한다면, 이 값은 그와
+// 별개로 "오늘 기준 며칠 지난 문서까지만 AI로 요약할지"를 정한다. 예:
+// 30이면 오늘부터 30일 이내에 기안된 문서만 Claude API로 파싱하고, 그보다
+// 오래된 문서는(베이스라인이 아니라 정말로 처음 감지된 새 문서라도) 규칙
+// 기반 폴백만 적용한다 — 지난 문서는 마감이 이미 지났을 가능성이 높아
+// 3줄 요약의 실무 가치가 낮은데 API 비용은 똑같이 들기 때문.
+// null/0이면 "제한 없음"(모든 새 문서를 요약)을 뜻한다. 기본값 30.
+const DEFAULT_AI_SUMMARY_MAX_AGE_DAYS = 30;
+
+/**
+ * @returns {Promise<number>} 0이면 제한 없음
+ */
+export async function getAiSummaryMaxAgeDays() {
+  const v = await getMeta("aiSummaryMaxAgeDays");
+  return v === undefined || v === null ? DEFAULT_AI_SUMMARY_MAX_AGE_DAYS : Number(v) || 0;
+}
+
+/**
+ * @param {number} days  0이면 제한 없음
+ */
+export async function setAiSummaryMaxAgeDays(days) {
+  return setMeta("aiSummaryMaxAgeDays", Number(days) || 0);
 }
 
 // ---------------------------------------------------------------------------

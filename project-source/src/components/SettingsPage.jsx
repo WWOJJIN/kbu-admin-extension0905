@@ -13,7 +13,13 @@ import {
   getMeta,
   getAutoDetailFetchOnArrival,
   setAutoDetailFetchOnArrival,
+  getAiSummaryEnabled,
+  setAiSummaryEnabled,
+  getAiSummaryMaxAgeDays,
+  setAiSummaryMaxAgeDays,
 } from "../lib/db.js";
+
+const AI_SUMMARY_AGE_OPTIONS = [7, 14, 30, 60, 90, 0]; // 0 = 제한 없음
 
 const WEEK_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
 
@@ -68,7 +74,82 @@ function FeatureTogglesSection() {
   );
 }
 
-// 2026-09-02 추가: 새 협조문 도착 시 상세를 자동으로 가져와 AI 요약을 만들지
+// 2026-09-05 추가: Claude API 사용 여부를 딱 하나로 끄고 켜는 스위치.
+// FeatureTogglesSection(탭 표시 여부)과는 별개 — 이건 API 키가 발급되고
+// 실제 비용이 발생하기 시작한 뒤로, 사용량이 걱정될 때 곧바로 Claude API
+// 호출 자체를 막을 수 있게 하려고 추가함. 꺼도 원문/마감일 후보(규칙기반)/
+// 캘린더/알림은 그대로 동작하고 AI 3줄 요약만 안 생긴다.
+function AiSummaryToggleSection() {
+  const [enabled, setEnabled] = useState(null);
+  const [maxAgeDays, setMaxAgeDays] = useState(null);
+
+  useEffect(() => {
+    getAiSummaryEnabled().then(setEnabled);
+    getAiSummaryMaxAgeDays().then(setMaxAgeDays);
+  }, []);
+
+  if (enabled === null || maxAgeDays === null) return null;
+
+  const toggle = async () => {
+    const next = !enabled;
+    setEnabled(next);
+    await setAiSummaryEnabled(next);
+  };
+
+  const changeMaxAge = async (e) => {
+    const next = Number(e.target.value);
+    setMaxAgeDays(next);
+    await setAiSummaryMaxAgeDays(next);
+  };
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-sm font-semibold text-brand-navy mb-1">AI 요약(Claude API) 사용</h3>
+      <label className="flex items-start gap-2.5 border border-brand-border rounded-lg p-3.5 cursor-pointer hover:bg-brand-alt">
+        <input type="checkbox" checked={enabled} onChange={toggle} className="mt-1 w-4 h-4" />
+        <div>
+          <p className="text-sm font-medium text-brand-navy">협조문 3줄 요약에 Claude API 사용</p>
+          <p className="text-xs text-brand-muted mt-0.5">
+            끄면 새 협조문이 와도 Claude API를 아예 호출하지 않아요(비용 발생 없음). 대신 3줄 요약만 빠지고,
+            마감일 후보·처리필요 여부는 규칙기반으로 계속 채워지며 캘린더·알림도 그대로 동작해요. 나중에 다시
+            켜면 그 시점부터 새로 감지되는 협조문부터 AI 요약이 생겨요(과거 문서는 소급 적용 안 됨).
+          </p>
+        </div>
+      </label>
+
+      {/* 2026-09-05 추가: "오늘 기준 N일 지난 문서는 굳이 AI로 안 요약해도
+          되지 않냐"는 요청 반영. AI 요약 자체가 켜져 있을 때만 의미가 있어서
+          enabled가 false면 흐리게 표시하고 비활성화한다. */}
+      <div
+        className={`mt-2 flex items-center justify-between border border-brand-border rounded-lg px-3.5 py-2.5 ${
+          enabled ? "" : "opacity-50"
+        }`}
+      >
+        <div className="pr-3">
+          <p className="text-sm text-brand-navy">AI 요약 대상 기간</p>
+          <p className="text-xs text-brand-muted mt-0.5">
+            문서의 기안일이 오늘 기준 이 기간보다 오래됐으면(예: 뒤늦게 처음 감지된 옛날 문서), AI 요약 없이
+            규칙기반 값만 채워요. API 비용 절감 목적이에요.
+          </p>
+        </div>
+        <select
+          value={maxAgeDays}
+          onChange={changeMaxAge}
+          disabled={!enabled}
+          className="border border-brand-border rounded px-1.5 py-1 text-xs bg-white shrink-0"
+        >
+          {AI_SUMMARY_AGE_OPTIONS.map((d) => (
+            <option key={d} value={d}>
+              {d === 0 ? "제한 없음" : `${d}일`}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+
 // 여부. 기본은 꺼짐(false) — db.js getAutoDetailFetchOnArrival 주석 참고.
 function AutoDetailFetchSection() {
   const [enabled, setEnabled] = useState(null);
@@ -356,6 +437,7 @@ export default function SettingsPage() {
         </label>
       </div>
 
+      <AiSummaryToggleSection />
       <AutoDetailFetchSection />
       <FeatureTogglesSection />
       <DeptCodesSection />

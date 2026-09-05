@@ -347,6 +347,13 @@ async function setMeta(key, value) {
   await db.put(STORE_META, { key, value });
   return value;
 }
+var SYNC_BASELINE_PREFIX = "syncBaselineDone:";
+async function getSyncBaselineDone(key) {
+  return Boolean(await getMeta(`${SYNC_BASELINE_PREFIX}${key}`));
+}
+async function setSyncBaselineDone(key) {
+  return setMeta(`${SYNC_BASELINE_PREFIX}${key}`, true);
+}
 async function getDeptCodes() {
   const list = await getMeta("deptCodes");
   return Array.isArray(list) ? list : [];
@@ -371,6 +378,15 @@ async function setFeatureEnabled(id, enabled) {
   cur[id] = !!enabled;
   await setMeta("featureToggles", cur);
   return cur;
+}
+async function getAiSummaryEnabled() {
+  const v = await getMeta("aiSummaryEnabled");
+  return v === void 0 || v === null ? true : Boolean(v);
+}
+var DEFAULT_AI_SUMMARY_MAX_AGE_DAYS = 30;
+async function getAiSummaryMaxAgeDays() {
+  const v = await getMeta("aiSummaryMaxAgeDays");
+  return v === void 0 || v === null ? DEFAULT_AI_SUMMARY_MAX_AGE_DAYS : Number(v) || 0;
 }
 async function getAutoDetailFetchOnArrival() {
   const v = await getMeta("autoDetailFetchOnArrival");
@@ -515,6 +531,20 @@ var ENDPOINTS = {
     // 학적변동 승인단계별 현황
     menuId: "M104947",
     pgmId: "P005858"
+  },
+  // 2026-09-05 실측 완료 — 로그인 계정이 실제로 권한을 가진 메뉴 전체 목록.
+  // isLogin/userGbList와 마찬가지로 menuId=M000000/pgmId=P000000인 공통 화면
+  // (특정 업무 메뉴가 아니라 프레임워크 부트스트랩 영역). 응답 Dataset
+  // "DS_MENULIST"에 menuId 컬럼이 있고, 이 목록에 없는 menuId는 그 계정이
+  // ERP 메뉴로는 절대 들어갈 수 없는 화면이라는 뜻 — 즉 ERP가 하는 메뉴 권한
+  // 검사를 그대로 재현할 수 있음. 실측: 권한 없는 계정(W) 응답엔 학적변동승인처리
+  // (M104947)가 없고, 권한 있는 계정 응답엔 있음 — 대조 확인 완료.
+  // ⚠️ Content-Type/헤더가 postDataset과 달라서(text/plain + Reqfoundataion:
+  // nexacro) postParamsOnly로 호출해야 함(findAttachDocList.do와 동일 패턴).
+  authMenuList: {
+    path: "/com/MenuCtr/findAuthMenuList.do",
+    menuId: "M000000",
+    pgmId: "P000000"
   }
 };
 var COOP_DOC_LIST_SCHEMA = [
@@ -536,6 +566,10 @@ function buildXmlRequest(datasetId, params = {}, columnSchema) {
   const columnInfo = schema.map((key) => `<Column id="${key}" type="STRING" size="256"/>`).join("");
   const cols = Object.entries(params).filter(([, value]) => value !== void 0 && value !== null && value !== "").map(([key, value]) => `<Col id="${key}">${escapeXml(String(value))}</Col>`).join("");
   return `<?xml version="1.0" encoding="utf-8"?><Root xmlns="http://www.nexacroplatform.com/platform/dataset"><Parameters><Parameter id="requestTimeStr">${Date.now()}</Parameter></Parameters><Dataset id="${datasetId}"><ColumnInfo>${columnInfo}</ColumnInfo><Rows><Row>${cols}</Row></Rows></Dataset></Root>`;
+}
+function buildParamsOnlyXmlRequest(params = {}) {
+  const paramTags = Object.entries(params).filter(([, value]) => value !== void 0 && value !== null).map(([key, value]) => `<Parameter id="${key}">${escapeXml(String(value))}</Parameter>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><Root xmlns="http://www.nexacroplatform.com/platform/dataset"><Parameters>${paramTags}<Parameter id="requestTimeStr">${Date.now()}</Parameter></Parameters></Root>`;
 }
 function escapeXml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -767,6 +801,32 @@ async function postDataset(endpoint, requestDatasetId, params, columnSchema, res
   }
   return parseXmlResponse(text, responseDatasetId);
 }
+async function postParamsOnly(endpoint, params, responseDatasetId) {
+  const body = buildParamsOnlyXmlRequest(params);
+  const query = new URLSearchParams();
+  if (endpoint.menuId) query.set("menuId", endpoint.menuId);
+  if (endpoint.pgmId) query.set("pgmId", endpoint.pgmId);
+  const queryString = query.toString();
+  const url = `${BASE_URL}${endpoint.path}${queryString ? `?${queryString}` : ""}`;
+  const res = await fetchWithRetry(url, {
+    method: "POST",
+    credentials: "include",
+    referrer: `${BASE_URL}/nx/index.html`,
+    headers: {
+      "Content-Type": "text/plain;charset=UTF-8",
+      "Reqfoundataion": "nexacro"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!/<Dataset[\s>]/i.test(text)) {
+    const err = new Error("ERP \uC751\uB2F5\uC774 \uC608\uC0C1\uD55C Dataset XML\uC774 \uC544\uB2D8 (\uC138\uC158 \uB9CC\uB8CC\uB85C \uB85C\uADF8\uC778 \uD398\uC774\uC9C0\uAC00 \uB0B4\uB824\uC654\uC744 \uAC00\uB2A5\uC131)");
+    err.code = "SESSION_EXPIRED_OR_UNEXPECTED_RESPONSE";
+    err.responseSnippet = text.slice(0, 300);
+    throw err;
+  }
+  return parseXmlResponse(text, responseDatasetId);
+}
 function fetchCoopDocList({ stGbn = "03", docDeptCd = "" } = {}) {
   return postDataset(
     ENDPOINTS.coopDocList,
@@ -836,6 +896,10 @@ function fetchInternalDraftList({ stGbn = "" } = {}) {
 function fetchApprovalPendingList({ stGbn = "02" } = {}) {
   return postDataset(ENDPOINTS.aprvMngList, "DS_COND", { stGbn });
 }
+async function fetchAuthMenuIds() {
+  const rows = await postParamsOnly(ENDPOINTS.authMenuList, {}, "DS_MENULIST");
+  return new Set(rows.map((r) => r.menuId).filter(Boolean));
+}
 function fetchStatusChangeList() {
   return postDataset(ENDPOINTS.statusChangeList, "DS_COND", {}, void 0, "DS_SREG260");
 }
@@ -866,15 +930,15 @@ var SYSTEM_PROMPT = [
   "- action_description (string \uB610\uB294 null): \uD544\uC694\uD55C \uC870\uCE58 \uB0B4\uC6A9 \uD55C \uC904 \uC124\uBA85, \uC5C6\uC73C\uBA74 null",
   "- summary (string): \uBB38\uC11C \uD575\uC2EC \uB0B4\uC6A9 \uC694\uC57D. \uBC18\uB4DC\uC2DC 3\uC904 \uC774\uB0B4(\uC904\uBC14\uAFC8 \uCD5C\uB300 2\uBC88)\uB85C, \uAC01 \uC904\uC740 \uACF5\uBC31 \uD3EC\uD568 40\uC790 \uC774\uB0B4\uB85C \uAC04\uACB0\uD558\uAC8C \uC791\uC131. 3\uC904\uC744 \uB118\uAE30\uAC70\uB098 \uC7A5\uD669\uD558\uAC8C \uD480\uC5B4 \uC4F0\uC9C0 \uB9D0 \uAC83."
 ].join("\n");
-async function parseCoopDoc(rawText) {
+async function parseCoopDoc(rawText, aprvNo) {
   if (!PROXY_URL) {
     throw new Error(
       "[claudeApi] \uD504\uB85D\uC2DC \uC11C\uBC84 URL\uC774 \uC544\uC9C1 \uC124\uC815\uB418\uC9C0 \uC54A\uC74C (proxy/ \uBC30\uD3EC \uD6C4 PROXY_URL\uC744 \uCC44\uC6B8 \uAC83)"
     );
   }
-  return callProxyWithRetry(rawText, 1);
+  return callProxyWithRetry(rawText, aprvNo, 1);
 }
-async function callProxyWithRetry(rawText, retries) {
+async function callProxyWithRetry(rawText, aprvNo, retries) {
   try {
     const res = await fetch(PROXY_URL, {
       method: "POST",
@@ -885,7 +949,11 @@ async function callProxyWithRetry(rawText, retries) {
       body: JSON.stringify({
         model: "claude-haiku-4-5",
         system: SYSTEM_PROMPT,
-        text: rawText
+        text: rawText,
+        // 캐시 키용 문서 고유 ID. 프록시가 이 값으로 "이미 파싱한 문서인지"
+        // 먼저 확인하고, 있으면 Claude API 호출 없이 캐시된 결과를 돌려주는
+        // 방식을 기대함 — 값이 없어도(aprvNo 미전달) 요청 자체는 그대로 동작.
+        doc_id: aprvNo ?? null
       })
     });
     if (!res.ok) throw new Error(`\uD504\uB85D\uC2DC \uC694\uCCAD \uC2E4\uD328: ${res.status} ${res.statusText}`);
@@ -893,7 +961,7 @@ async function callProxyWithRetry(rawText, retries) {
     return normalizeParsedDoc(data);
   } catch (err) {
     if (retries > 0) {
-      return callProxyWithRetry(rawText, retries - 1);
+      return callProxyWithRetry(rawText, aprvNo, retries - 1);
     }
     throw err;
   }
@@ -1035,7 +1103,22 @@ async function notifySessionExpiredThrottled() {
     console.warn("[background] \uC138\uC158 \uB9CC\uB8CC \uC54C\uB9BC \uC2E4\uD328:", err);
   }
 }
+var coopPollInProgress = false;
+var approvalPollInProgress = false;
+var statusChangePollInProgress = false;
 async function pollCoopDocs() {
+  if (coopPollInProgress) {
+    console.log("[background] \uD611\uC870\uBB38 \uD3F4\uB9C1\uC774 \uC544\uC9C1 \uC9C4\uD589 \uC911 \u2014 \uC774\uBC88 \uC54C\uB78C\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4.");
+    return;
+  }
+  coopPollInProgress = true;
+  try {
+    await pollCoopDocsInner();
+  } finally {
+    coopPollInProgress = false;
+  }
+}
+async function pollCoopDocsInner() {
   let listItems;
   try {
     listItems = await fetchMyCoopDocList();
@@ -1066,14 +1149,23 @@ async function pollCoopDocs() {
     existingIds,
     hasCoopDocStatusChanged
   );
+  const isBaseline = !await getSyncBaselineDone("coop");
+  if (isBaseline && newItems.length > 0) {
+    console.log(
+      `[background] \uD611\uC870\uBB38 \uCD5C\uCD08 \uB3D9\uAE30\uD654 \u2014 \uAE30\uC874 ${newItems.length}\uAC74\uC740 \uC54C\uB9BC \uC5C6\uC774 \uC800\uC7A5\uB9CC \uD569\uB2C8\uB2E4.`
+    );
+  }
   console.log(
     `[background] \uD611\uC870\uBB38\uC218\uC2E0\uD568 \uD3F4\uB9C1: \uCD1D ${listItems.length}\uAC74 (\uC2E0\uADDC ${newItems.length}, \uC0C1\uD0DC\uBCC0\uACBD ${changedItems.length})`
   );
   for (const item of newItems) {
-    await handleNewCoopDoc(item);
+    await handleNewCoopDoc(item, { silent: isBaseline });
   }
   for (const item of changedItems) {
     await handleChangedCoopDoc(item);
+  }
+  if (isBaseline) {
+    await setSyncBaselineDone("coop");
   }
 }
 var APPROVAL_SOURCES = [
@@ -1091,6 +1183,18 @@ function dateKey(d) {
   return `${y}-${m}-${day}`;
 }
 async function pollApprovalStatus() {
+  if (approvalPollInProgress) {
+    console.log("[background] \uACB0\uC7AC\uD604\uD669 \uD3F4\uB9C1\uC774 \uC544\uC9C1 \uC9C4\uD589 \uC911 \u2014 \uC774\uBC88 \uC54C\uB78C\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4.");
+    return;
+  }
+  approvalPollInProgress = true;
+  try {
+    await pollApprovalStatusInner();
+  } finally {
+    approvalPollInProgress = false;
+  }
+}
+async function pollApprovalStatusInner() {
   const results = await Promise.allSettled(
     APPROVAL_SOURCES.map(
       (src) => src.fetch().then((rows) => (rows || []).map((r) => ({ ...r, _source: src.key })))
@@ -1113,6 +1217,7 @@ async function pollApprovalStatus() {
     "[background] \uACB0\uC7AC\uD604\uD669 \uD3F4\uB9C1: " + APPROVAL_SOURCES.map((src) => `${src.label} ${bySource.get(src.key)?.length ?? "\uC2E4\uD328"}\uAC74`).join(", ")
   );
   const existingIds = await getAllApprovalItemIds();
+  const isBaseline = !await getSyncBaselineDone("approval");
   for (const src of APPROVAL_SOURCES) {
     const items = bySource.get(src.key);
     if (!items) continue;
@@ -1125,7 +1230,7 @@ async function pollApprovalStatus() {
       const aprvLevel = item.aprvLevel || "";
       const lastAprvUser = item.lastAprvUser || "";
       if (!existingIds.has(id)) {
-        notifyNewApprovalItem(src.label, item);
+        if (!isBaseline) notifyNewApprovalItem(src.label, item);
       } else {
         const changed = await hasApprovalStatusChanged(id, {
           stGbn: item.stGbn,
@@ -1156,6 +1261,9 @@ async function pollApprovalStatus() {
         created_at: existing?.created_at || Date.now()
       });
     }
+  }
+  if (isBaseline) {
+    await setSyncBaselineDone("approval");
   }
   await checkApprovalReminders();
 }
@@ -1219,13 +1327,48 @@ async function checkApprovalReminders() {
 }
 var MAX_STATUS_ROWS_PER_SYNC = 20;
 var STATUS_SCHEMA_VERSION = 2;
+var STATUS_CHANGE_MENU_ID = "M104947";
 function statusChangeKey(row) {
   return `SREG-${row.stuno}-${row.schregModAplyDt}-${row.schregModGbn}`;
 }
 async function pollStatusChanges() {
+  if (statusChangePollInProgress) {
+    console.log("[background] \uD559\uC801\uBCC0\uB3D9 \uD3F4\uB9C1\uC774 \uC544\uC9C1 \uC9C4\uD589 \uC911 \u2014 \uC774\uBC88 \uC54C\uB78C\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4.");
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, reason: "already_in_progress" };
+  }
+  statusChangePollInProgress = true;
+  try {
+    return await pollStatusChangesInner();
+  } finally {
+    statusChangePollInProgress = false;
+  }
+}
+async function pollStatusChangesInner() {
   const toggles = await getFeatureToggles();
   if (!toggles.status) {
     return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true };
+  }
+  let authorizedMenus;
+  try {
+    authorizedMenus = await fetchAuthMenuIds();
+  } catch (err) {
+    console.warn("[background] \uBA54\uB274 \uAD8C\uD55C \uBAA9\uB85D \uC870\uD68C \uC2E4\uD328 \u2014 \uC548\uC804\uD558\uAC8C \uC774\uBC88 \uD559\uC801\uBCC0\uB3D9 \uD3F4\uB9C1\uC744 \uAC74\uB108\uB701\uB2C8\uB2E4:", err);
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, reason: "menu_check_failed" };
+  }
+  if (!authorizedMenus.has(STATUS_CHANGE_MENU_ID)) {
+    console.warn(
+      "[background] \uC774 \uACC4\uC815\uC740 \uD559\uC801\uBCC0\uB3D9\uC2B9\uC778\uCC98\uB9AC \uBA54\uB274 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uAE30\uB2A5\uC744 \uC790\uB3D9\uC73C\uB85C \uAED0\uC2B5\uB2C8\uB2E4:",
+      STATUS_CHANGE_MENU_ID
+    );
+    await setFeatureEnabled("status", false);
+    chrome.notifications.create("status-no-menu-permission", {
+      type: "basic",
+      iconUrl: NOTIFICATION_ICON,
+      title: "\uD559\uC801\uBCC0\uB3D9\uB300\uC0C1\uC790\uBAA9\uB85D \uAE30\uB2A5 \uC790\uB3D9 \uBE44\uD65C\uC131\uD654",
+      message: "\uC774 \uACC4\uC815\uC740 \uD559\uC801\uBCC0\uB3D9\uC2B9\uC778\uCC98\uB9AC \uBA54\uB274 \uAD8C\uD55C\uC774 \uC5C6\uC5B4 \uC790\uB3D9\uC73C\uB85C \uAED0\uC2B5\uB2C8\uB2E4.",
+      priority: 1
+    });
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, autoDisabled: true, reason: "no_menu_permission" };
   }
   let listRows;
   try {
@@ -1248,6 +1391,7 @@ async function pollStatusChanges() {
   const rows = (listRows || []).filter((r) => r.stuno).slice().sort((a, b) => (b.schregModAplyDt || "").localeCompare(a.schregModAplyDt || "")).slice(0, MAX_STATUS_ROWS_PER_SYNC);
   let newCount = 0;
   let changedCount = 0;
+  const isBaseline = !await getSyncBaselineDone("statusChange");
   for (const row of rows) {
     const key = statusChangeKey(row);
     const prev = await getStatusChange(key);
@@ -1260,8 +1404,9 @@ async function pollStatusChanges() {
         accpObjGbnNm: s.accpObjGbnNm || "",
         accpGbnNm: s.accpGbnNm || "",
         empNm: s.empNm || "",
+        recaResn: s.recaResn || "",
+        // 반려 사유
         raw: s
-        // 원본 행 전체 (반려 사유 등 아직 못 찾은 필드가 여기 들어있을 수 있음)
       }));
     } catch (err) {
       console.warn("[background] \uD559\uC801\uBCC0\uB3D9 \uC2B9\uC778\uB2E8\uACC4 \uC870\uD68C \uC2E4\uD328:", key, err);
@@ -1302,16 +1447,21 @@ async function pollStatusChanges() {
     await upsertStatusChange(doc);
     if (!prev) {
       newCount++;
-      chrome.notifications.create({
-        type: "basic",
-        iconUrl: NOTIFICATION_ICON,
-        title: "\uC0C8 \uD559\uC801\uBCC0\uB3D9 \uC2E0\uCCAD",
-        message: `${doc.stdKorNm}(${doc.stuno}) \xB7 ${doc.schregModGbnNm} \xB7 ${doc.deptNm}`,
-        priority: 1
-      });
+      if (!isBaseline) {
+        chrome.notifications.create({
+          type: "basic",
+          iconUrl: NOTIFICATION_ICON,
+          title: "\uC0C8 \uD559\uC801\uBCC0\uB3D9 \uC2E0\uCCAD",
+          message: `${doc.stdKorNm}(${doc.stuno}) \xB7 ${doc.schregModGbnNm} \xB7 ${doc.deptNm}`,
+          priority: 1
+        });
+      }
     } else {
       changedCount++;
     }
+  }
+  if (isBaseline) {
+    await setSyncBaselineDone("statusChange");
   }
   return { total: listRows.length, processed: rows.length, newCount, changedCount };
 }
@@ -1325,7 +1475,16 @@ function normalizeDocDate(item) {
   }
   return "";
 }
-async function handleNewCoopDoc(item) {
+function isTooOldForAiSummary(item, maxAgeDays) {
+  if (!maxAgeDays || maxAgeDays <= 0) return false;
+  const dateStr = normalizeDocDate(item);
+  if (!dateStr) return false;
+  const docTime = (/* @__PURE__ */ new Date(`${dateStr}T00:00:00`)).getTime();
+  if (Number.isNaN(docTime)) return false;
+  const ageMs = Date.now() - docTime;
+  return ageMs > maxAgeDays * 24 * 60 * 60 * 1e3;
+}
+async function handleNewCoopDoc(item, { silent = false } = {}) {
   const aprvNo = item.aprvNo;
   let rawText = item.ctnt ?? item.subject ?? "";
   let rawHtml = "";
@@ -1334,8 +1493,10 @@ async function handleNewCoopDoc(item) {
   let parsed = null;
   const autoFetch = await getAutoDetailFetchOnArrival();
   if (!autoFetch) {
-    await upsertCoopDoc(buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }));
-    notifyNewCoopDoc(item);
+    await upsertCoopDoc(
+      buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew: !silent })
+    );
+    if (!silent) notifyNewCoopDoc(item);
     return;
   }
   try {
@@ -1356,15 +1517,26 @@ async function handleNewCoopDoc(item) {
   } catch (err) {
     console.warn(`[background] \uD611\uC870\uBB38 \uC0C1\uC138 \uC870\uD68C \uC2E4\uD328 (aprvNo=${aprvNo}), \uBAA9\uB85D \uC815\uBCF4\uB85C \uB300\uCCB4:`, err);
   }
-  try {
-    parsed = await parseCoopDoc(rawText);
-  } catch (err) {
-    console.error(`[background] AI \uD30C\uC2F1 \uC2E4\uD328 (aprvNo=${aprvNo}):`, err);
+  const maxAgeDays = await getAiSummaryMaxAgeDays();
+  const tooOld = isTooOldForAiSummary(item, maxAgeDays);
+  if (!silent && tooOld) {
+    console.log(
+      `[background] \uBB38\uC11C\uAC00 AI \uC694\uC57D \uB300\uC0C1 \uAE30\uAC04(${maxAgeDays}\uC77C)\uBCF4\uB2E4 \uC624\uB798\uB3FC\uC11C AI \uD30C\uC2F1\uC744 \uAC74\uB108\uB701\uB2C8\uB2E4 (aprvNo=${aprvNo})`
+    );
   }
-  await upsertCoopDoc(buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }));
-  notifyNewCoopDoc(item);
+  if (!silent && !tooOld && await getAiSummaryEnabled()) {
+    try {
+      parsed = await parseCoopDoc(rawText, aprvNo);
+    } catch (err) {
+      console.error(`[background] AI \uD30C\uC2F1 \uC2E4\uD328 (aprvNo=${aprvNo}):`, err);
+    }
+  }
+  await upsertCoopDoc(
+    buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew: !silent })
+  );
+  if (!silent) notifyNewCoopDoc(item);
 }
-function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }) {
+function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew = true }) {
   const fallback = fillParsedFallback(parsed, rawText);
   return {
     id: item.aprvNo,
@@ -1386,7 +1558,11 @@ function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVe
     deadline_is_fallback: parsed?.deadline == null,
     requires_action_is_fallback: parsed?.requires_action == null,
     action_description: parsed?.action_description ?? null,
-    is_new: true,
+    // 2026-09-05 수정: 예전엔 항상 true였는데, 베이스라인(최초 동기화) 중에
+    // silent로 들어온 문서까지 전부 "안 읽음" 배지가 붙는 문제가 있었음 —
+    // 알림은 안 뜨는데 정작 화면엔 전부 신규로 표시되는 불일치. 이제 베이스라인
+    // 문서는 isNew=false로 저장해서 알림 여부와 화면 표시가 일치한다.
+    is_new: isNew,
     is_completed: false,
     calendar_registered: false,
     // 2026-08-21 정정: attachments 스텁 대신 attachNo만 저장 — 실제 파일 목록은

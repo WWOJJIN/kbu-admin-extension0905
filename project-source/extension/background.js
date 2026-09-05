@@ -26,6 +26,10 @@ import {
   getFeatureToggles,
   setFeatureEnabled,
   getAutoDetailFetchOnArrival,
+  getAiSummaryEnabled,
+  getAiSummaryMaxAgeDays,
+  getSyncBaselineDone,
+  setSyncBaselineDone,
 } from "../src/lib/db.js";
 import {
   fetchMyCoopDocList,
@@ -37,6 +41,7 @@ import {
   fetchApprovalPendingList,
   fetchStatusChangeList,
   fetchStatusChangeStages,
+  fetchAuthMenuIds,
   RAW_TEXT_EXTRACT_VERSION,
   RECV_DEPT_SCHEMA_VERSION,
 } from "../src/lib/kisApi.js";
@@ -193,6 +198,20 @@ async function notifySessionExpiredThrottled() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 동시 실행 방지 — 2026-09-05 추가.
+// chrome.alarms는 1분마다 무조건 콜백을 부른다. 만약 한 번의 폴링이 1분보다
+// 오래 걸리면(새 문서가 많아 상세조회+AI파싱이 몰릴 때), 아직 이전 실행이
+// 안 끝났는데 다음 알람이 또 같은 함수를 불러서 두 실행이 겹칠 수 있다 —
+// 그러면 같은 새 문서를 두 실행이 동시에 "새 문서"로 인식해 Claude API를
+// 중복 호출하는 등의 문제가 생긴다. 세 폴링 함수는 서로 완전히 독립적으로
+// 설계돼 있으므로, 잠금도 각자 따로 둔다(하나가 오래 걸린다고 나머지가
+// 막히면 안 됨).
+// ---------------------------------------------------------------------------
+let coopPollInProgress = false;
+let approvalPollInProgress = false;
+let statusChangePollInProgress = false;
+
 /**
  * 1분마다(또는 설치 직후) 실행되는 협조문수신함 폴링 사이클.
  * ⚠️ 2026-08-23(7): "전사문서열람 하지 말고 협조문수신함에 나에게 온 것만"
@@ -205,6 +224,19 @@ async function notifySessionExpiredThrottled() {
  * kisApi.js의 fetchMyCoopDocList 주석 참고.
  */
 export async function pollCoopDocs() {
+  if (coopPollInProgress) {
+    console.log("[background] 협조문 폴링이 아직 진행 중 — 이번 알람은 건너뜁니다.");
+    return;
+  }
+  coopPollInProgress = true;
+  try {
+    await pollCoopDocsInner();
+  } finally {
+    coopPollInProgress = false;
+  }
+}
+
+async function pollCoopDocsInner() {
   let listItems;
   try {
     listItems = await fetchMyCoopDocList();
@@ -245,6 +277,18 @@ export async function pollCoopDocs() {
     hasCoopDocStatusChanged
   );
 
+  // 2026-09-05 추가: 최초 동기화(이 브라우저에서 협조문을 한 번도 저장해본
+  // 적 없음)면, 지금 목록에 있는 문서는 전부 "이미 예전부터 있었을 수 있는
+  // 문서"다 — 알림 없이 조용히 저장만 하고, AI 요약도 굳이 태우지 않는다
+  // (오래된 문서에 API 비용 쓸 필요 없음). 그 다음 폴링부터 진짜 새 문서만
+  // 평소대로 알림 + AI 요약이 붙는다.
+  const isBaseline = !(await getSyncBaselineDone("coop"));
+  if (isBaseline && newItems.length > 0) {
+    console.log(
+      `[background] 협조문 최초 동기화 — 기존 ${newItems.length}건은 알림 없이 저장만 합니다.`
+    );
+  }
+
   // 2026-09-02: 서비스워커 콘솔(chrome://extensions → 서비스 워커)을 열었을 때
   // "폴링이 살아있긴 한지, 몇 건이나 보고 있는지"를 바로 확인할 수 있는 로그가
   // 전혀 없었다(성공 시엔 pollLog(storage)에만 조용히 남고 console에는 아무것도
@@ -255,10 +299,14 @@ export async function pollCoopDocs() {
   );
 
   for (const item of newItems) {
-    await handleNewCoopDoc(item);
+    await handleNewCoopDoc(item, { silent: isBaseline });
   }
   for (const item of changedItems) {
     await handleChangedCoopDoc(item);
+  }
+
+  if (isBaseline) {
+    await setSyncBaselineDone("coop");
   }
 }
 
@@ -305,6 +353,19 @@ function dateKey(d) {
  * 미검증 등) 나머지는 정상 진행된다.
  */
 export async function pollApprovalStatus() {
+  if (approvalPollInProgress) {
+    console.log("[background] 결재현황 폴링이 아직 진행 중 — 이번 알람은 건너뜁니다.");
+    return;
+  }
+  approvalPollInProgress = true;
+  try {
+    await pollApprovalStatusInner();
+  } finally {
+    approvalPollInProgress = false;
+  }
+}
+
+async function pollApprovalStatusInner() {
   const results = await Promise.allSettled(
     APPROVAL_SOURCES.map((src) =>
       src.fetch().then((rows) => (rows || []).map((r) => ({ ...r, _source: src.key })))
@@ -336,6 +397,11 @@ export async function pollApprovalStatus() {
 
   const existingIds = await getAllApprovalItemIds();
 
+  // 2026-09-05 추가: 협조문과 동일한 이유로 — 이 브라우저에서 결재현황을
+  // 한 번도 저장해본 적 없으면, 지금 목록에 있는 건 전부 예전부터 있었을
+  // 문서다. 알림 없이 저장만 하고, 다음 폴링부터 진짜 새 건만 알림.
+  const isBaseline = !(await getSyncBaselineDone("approval"));
+
   for (const src of APPROVAL_SOURCES) {
     const items = bySource.get(src.key);
     if (!items) continue; // 이 화면만 실패한 경우
@@ -352,7 +418,7 @@ export async function pollApprovalStatus() {
       const lastAprvUser = item.lastAprvUser || "";
 
       if (!existingIds.has(id)) {
-        notifyNewApprovalItem(src.label, item);
+        if (!isBaseline) notifyNewApprovalItem(src.label, item);
       } else {
         const changed = await hasApprovalStatusChanged(id, {
           stGbn: item.stGbn,
@@ -384,6 +450,10 @@ export async function pollApprovalStatus() {
         created_at: existing?.created_at || Date.now(),
       });
     }
+  }
+
+  if (isBaseline) {
+    await setSyncBaselineDone("approval");
   }
 
   await checkApprovalReminders();
@@ -481,6 +551,15 @@ const MAX_STATUS_ROWS_PER_SYNC = 20;
 // 다음 폴링에서 상세를 다시 조회해 원본 전체를 채우도록 함.
 const STATUS_SCHEMA_VERSION = 2;
 
+// 학적변동승인처리 화면의 menuId. (kisApi.js ENDPOINTS.statusChangeList 참고)
+// ⚠️ 2026-09-05: 이 화면은 background.js가 API를 직접 호출하는 방식이라
+// ERP 메뉴 트리를 거치지 않는다 — 즉 이 계정이 실제로 이 메뉴 권한이
+// 없어도 findSrhregModAccpList.do 호출 자체는 그냥 성공해버리고, 심지어
+// 부서 필터도 없어서 전교 데이터가 그대로 돌아온다(실사용 중 발견 — W
+// 계정으로 실측 확인). 그래서 폴링 전에 반드시 fetchAuthMenuIds()로
+// "이 계정이 ERP 메뉴로 실제 들어갈 수 있는 화면인지"를 먼저 확인한다.
+const STATUS_CHANGE_MENU_ID = "M104947";
+
 function statusChangeKey(row) {
   return `SREG-${row.stuno}-${row.schregModAplyDt}-${row.schregModGbn}`;
 }
@@ -490,9 +569,50 @@ function statusChangeKey(row) {
  * @returns {Promise<{total: number, processed: number, newCount: number, changedCount: number, skipped?: boolean, autoDisabled?: boolean}>}
  */
 export async function pollStatusChanges() {
+  if (statusChangePollInProgress) {
+    console.log("[background] 학적변동 폴링이 아직 진행 중 — 이번 알람은 건너뜁니다.");
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, reason: "already_in_progress" };
+  }
+  statusChangePollInProgress = true;
+  try {
+    return await pollStatusChangesInner();
+  } finally {
+    statusChangePollInProgress = false;
+  }
+}
+
+async function pollStatusChangesInner() {
   const toggles = await getFeatureToggles();
   if (!toggles.status) {
     return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true };
+  }
+
+  // ⚠️ 2026-09-05: 실제 메뉴 권한을 먼저 확인한다. 아래 fetchStatusChangeList는
+  // 권한이 없어도 실패하지 않고 성공해버리는 케이스가 확인됐기 때문에(위 상수
+  // 설명 참고), catch로 걸러지는 걸 기대하면 안 되고 호출 전에 직접 검사해야
+  // 한다. 이 검사 자체가 실패하면(네트워크 문제 등) 안전하게 이번 회차는
+  // 건너뛴다 — "확인이 안 됐으니 일단 호출해본다"는 fail-open은 안 된다.
+  let authorizedMenus;
+  try {
+    authorizedMenus = await fetchAuthMenuIds();
+  } catch (err) {
+    console.warn("[background] 메뉴 권한 목록 조회 실패 — 안전하게 이번 학적변동 폴링을 건너뜁니다:", err);
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, reason: "menu_check_failed" };
+  }
+  if (!authorizedMenus.has(STATUS_CHANGE_MENU_ID)) {
+    console.warn(
+      "[background] 이 계정은 학적변동승인처리 메뉴 권한이 없습니다 — 기능을 자동으로 껐습니다:",
+      STATUS_CHANGE_MENU_ID
+    );
+    await setFeatureEnabled("status", false);
+    chrome.notifications.create("status-no-menu-permission", {
+      type: "basic",
+      iconUrl: NOTIFICATION_ICON,
+      title: "학적변동대상자목록 기능 자동 비활성화",
+      message: "이 계정은 학적변동승인처리 메뉴 권한이 없어 자동으로 껐습니다.",
+      priority: 1,
+    });
+    return { total: 0, processed: 0, newCount: 0, changedCount: 0, skipped: true, autoDisabled: true, reason: "no_menu_permission" };
   }
 
   let listRows;
@@ -523,6 +643,12 @@ export async function pollStatusChanges() {
   let newCount = 0;
   let changedCount = 0;
 
+  // 2026-09-05 추가: 협조문/결재현황과 동일한 이유로 — 이 브라우저에서
+  // 학적변동을 한 번도 저장해본 적 없으면, 지금 목록에 있는 건 전부
+  // 예전부터 있었을 신청 건이다. 알림 없이 저장만 하고, 다음 폴링부터
+  // 진짜 새 신청/단계변경만 알림.
+  const isBaseline = !(await getSyncBaselineDone("statusChange"));
+
   for (const row of rows) {
     const key = statusChangeKey(row);
     const prev = await getStatusChange(key);
@@ -541,11 +667,16 @@ export async function pollStatusChanges() {
       // 원본 행 전체를 같이 저장해두면, 반려된 건을 하나 열어서 stages[].raw를
       // 콘솔에 찍어보는 것만으로 실제 필드명을 바로 확인할 수 있다 — 반려
       // 사유가 있다면 그 필드명을 알아낸 뒤 위 화면에 정식으로 노출하면 됨.
+      // ⚠️ 2026-09-02(4) 확정: 반려 사유 필드명을 실사용자가 "원본 데이터
+      // 보기"로 직접 확인해서 알려줬다 — recaResn. 이제 정식 필드로 뽑아서
+      // 저장한다(raw도 계속 같이 저장 — 나중에 또 다른 필드가 필요해지면
+      // 코드 안 고치고 raw에서 바로 꺼내 쓸 수 있게).
       stages = (stageRows || []).map((s) => ({
         accpObjGbnNm: s.accpObjGbnNm || "",
         accpGbnNm: s.accpGbnNm || "",
         empNm: s.empNm || "",
-        raw: s, // 원본 행 전체 (반려 사유 등 아직 못 찾은 필드가 여기 들어있을 수 있음)
+        recaResn: s.recaResn || "", // 반려 사유
+        raw: s,
       }));
     } catch (err) {
       console.warn("[background] 학적변동 승인단계 조회 실패:", key, err);
@@ -572,6 +703,7 @@ export async function pollStatusChanges() {
     };
 
     // 단계별로 뭐가 바뀌었는지 비교해서, 바뀐 단계마다 개별 알림
+    // (베이스라인 중엔 prev가 항상 null이라 이 분기 자체가 안 타므로 별도 처리 불필요)
     if (prev && prev.stages) {
       for (const stage of stages) {
         const prevStage = prev.stages.find((s) => s.accpObjGbnNm === stage.accpObjGbnNm);
@@ -590,16 +722,22 @@ export async function pollStatusChanges() {
     await upsertStatusChange(doc);
     if (!prev) {
       newCount++;
-      chrome.notifications.create({
-        type: "basic",
-        iconUrl: NOTIFICATION_ICON,
-        title: "새 학적변동 신청",
-        message: `${doc.stdKorNm}(${doc.stuno}) · ${doc.schregModGbnNm} · ${doc.deptNm}`,
-        priority: 1,
-      });
+      if (!isBaseline) {
+        chrome.notifications.create({
+          type: "basic",
+          iconUrl: NOTIFICATION_ICON,
+          title: "새 학적변동 신청",
+          message: `${doc.stdKorNm}(${doc.stuno}) · ${doc.schregModGbnNm} · ${doc.deptNm}`,
+          priority: 1,
+        });
+      }
     } else {
       changedCount++;
     }
+  }
+
+  if (isBaseline) {
+    await setSyncBaselineDone("statusChange");
   }
 
   return { total: listRows.length, processed: rows.length, newCount, changedCount };
@@ -625,11 +763,35 @@ function normalizeDocDate(item) {
 }
 
 /**
+ * 문서(목록 API의 raw item)가 AI 요약 대상으로 삼기엔 너무 오래됐는지 확인한다.
+ * 설정 탭 "AI 요약 대상 기간"(getAiSummaryMaxAgeDays)이 0(제한 없음)이면
+ * 항상 false. 날짜를 못 구하면(normalizeDocDate가 빈 문자열) 안전하게
+ * "너무 오래된 건 아님"으로 취급해서 기존 동작(요약 시도)을 그대로 둔다.
+ * @param {Object} item
+ * @param {number} maxAgeDays
+ * @returns {boolean}
+ */
+function isTooOldForAiSummary(item, maxAgeDays) {
+  if (!maxAgeDays || maxAgeDays <= 0) return false;
+  const dateStr = normalizeDocDate(item);
+  if (!dateStr) return false;
+  const docTime = new Date(`${dateStr}T00:00:00`).getTime();
+  if (Number.isNaN(docTime)) return false;
+  const ageMs = Date.now() - docTime;
+  return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
+}
+
+/**
  * 신규 협조문 처리: (설정에 따라) 상세 조회 → 리치텍스트 디코딩 → AI 파싱 →
  * IndexedDB 저장 → 알림.
  * @param {Object} item  목록 API의 raw record
+ * @param {{silent?: boolean}} [options]  silent=true면 최초 동기화(베이스라인)
+ *   중이라는 뜻 — 알림을 띄우지 않고, AI 파싱도 건너뛴다(어차피 사용자가
+ *   방금 처음 보는 게 아니라 예전부터 있었을 문서라 급하지 않고, API 비용도
+ *   아낄 수 있음). 규칙기반 폴백(fillParsedFallback)은 그대로 적용되므로
+ *   마감일 후보/할 일 여부는 채워진다.
  */
-async function handleNewCoopDoc(item) {
+async function handleNewCoopDoc(item, { silent = false } = {}) {
   const aprvNo = item.aprvNo;
 
   // 상세 조회 실패 시를 대비해 목록에서 얻을 수 있는 값으로 폴백
@@ -654,8 +816,10 @@ async function handleNewCoopDoc(item) {
   // 실제로 확인한 시점과 일치하므로). 설정 탭에서 다시 켤 수 있음.
   const autoFetch = await getAutoDetailFetchOnArrival();
   if (!autoFetch) {
-    await upsertCoopDoc(buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }));
-    notifyNewCoopDoc(item);
+    await upsertCoopDoc(
+      buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew: !silent })
+    );
+    if (!silent) notifyNewCoopDoc(item);
     return;
   }
 
@@ -688,15 +852,34 @@ async function handleNewCoopDoc(item) {
     console.warn(`[background] 협조문 상세 조회 실패 (aprvNo=${aprvNo}), 목록 정보로 대체:`, err);
   }
 
-  try {
-    parsed = await parseCoopDoc(rawText);
-  } catch (err) {
-    // 프록시 미배포 상태에서는 항상 여기로 옴 — 정상. ERP 원문은 그래도 저장한다.
-    console.error(`[background] AI 파싱 실패 (aprvNo=${aprvNo}):`, err);
+  // 2026-09-05 추가: AI 요약이 꺼져있거나(설정), 베이스라인 저장 중(silent)
+  // 이거나, 문서가 설정된 기간(기본 30일)보다 오래됐으면 애초에 parseCoopDoc
+  // (=Claude API 호출)을 시도조차 하지 않는다. 프록시가 살아있어도 여기서
+  // 걸러지므로 "API 사용량이 걱정돼서 껐는데/오래된 문서인데도 백그라운드에서
+  // 계속 호출되고 있었다" 같은 사고를 원천 차단한다. 꺼져 있어도 rawText는
+  // 그대로 저장하고 아래 buildCoopDocRecord의 fillParsedFallback(규칙기반)이
+  // 마감일/할 일 여부 후보값을 채워주므로 3줄 요약만 빠지고 나머지 기능은
+  // 그대로 동작한다.
+  const maxAgeDays = await getAiSummaryMaxAgeDays();
+  const tooOld = isTooOldForAiSummary(item, maxAgeDays);
+  if (!silent && tooOld) {
+    console.log(
+      `[background] 문서가 AI 요약 대상 기간(${maxAgeDays}일)보다 오래돼서 AI 파싱을 건너뜁니다 (aprvNo=${aprvNo})`
+    );
+  }
+  if (!silent && !tooOld && (await getAiSummaryEnabled())) {
+    try {
+      parsed = await parseCoopDoc(rawText, aprvNo);
+    } catch (err) {
+      // 프록시 미배포 상태에서는 항상 여기로 옴 — 정상. ERP 원문은 그래도 저장한다.
+      console.error(`[background] AI 파싱 실패 (aprvNo=${aprvNo}):`, err);
+    }
   }
 
-  await upsertCoopDoc(buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }));
-  notifyNewCoopDoc(item);
+  await upsertCoopDoc(
+    buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew: !silent })
+  );
+  if (!silent) notifyNewCoopDoc(item);
 }
 
 /**
@@ -704,9 +887,9 @@ async function handleNewCoopDoc(item) {
  * 안 했든(목록 정보만 있는 상태) 공통으로 쓰는 조립 로직 — 두 경로가 갈라지면서
  * 필드 목록이 따로 놀아 나중에 하나만 고치고 잊어버리는 사고를 막기 위해 분리함.
  * @param {Object} item  목록 API의 raw record
- * @param {{rawText: string, rawHtml: string, bodyUnavailable: boolean|undefined, rawTextVersion: number|undefined, parsed: Object|null}} extracted
+ * @param {{rawText: string, rawHtml: string, bodyUnavailable: boolean|undefined, rawTextVersion: number|undefined, parsed: Object|null, isNew?: boolean}} extracted
  */
-function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed }) {
+function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVersion, parsed, isNew = true }) {
   // 3단계(kbu textUtils.js 이식): AI 파싱이 실패/미배포/미실행이라
   // deadline·requires_action이 비어있으면 정규식/키워드 기반 규칙으로 1차
   // 후보값을 채운다. AI 값이 있으면 그 값을 그대로 쓰고(폴백은 덮어쓰지 않음).
@@ -735,7 +918,11 @@ function buildCoopDocRecord(item, { rawText, rawHtml, bodyUnavailable, rawTextVe
     deadline_is_fallback: parsed?.deadline == null,
     requires_action_is_fallback: parsed?.requires_action == null,
     action_description: parsed?.action_description ?? null,
-    is_new: true,
+    // 2026-09-05 수정: 예전엔 항상 true였는데, 베이스라인(최초 동기화) 중에
+    // silent로 들어온 문서까지 전부 "안 읽음" 배지가 붙는 문제가 있었음 —
+    // 알림은 안 뜨는데 정작 화면엔 전부 신규로 표시되는 불일치. 이제 베이스라인
+    // 문서는 isNew=false로 저장해서 알림 여부와 화면 표시가 일치한다.
+    is_new: isNew,
     is_completed: false,
     calendar_registered: false,
     // 2026-08-21 정정: attachments 스텁 대신 attachNo만 저장 — 실제 파일 목록은

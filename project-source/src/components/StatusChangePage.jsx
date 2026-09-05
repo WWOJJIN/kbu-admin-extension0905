@@ -72,21 +72,23 @@ function currentStage(item) {
   return stages.find((s) => stageStatus(s) !== "approved") || null;
 }
 
-// ⚠️ 2026-09-02(3): 반려 사유가 실제로 응답의 어느 필드에 오는지 아직
-// 확인이 안 됐다(fetchStatusChangeStages 자체가 미검증 엔드포인트,
-// background.js 주석 참고). 필드명을 정확히 알면 REASON_KEY_HINTS에 그
-// 이름을 추가하면 바로 화면에 뜬다. 그 전까지는 "사유/코멘트/비고류로
-// 보이는 필드명 + 값이 실제로 채워진 것"만 느슨하게 찾아서 후보로 보여준다
-// — 못 찾으면 조용히 아무것도 안 보여줌(잘못된 값을 사유인 것처럼 확정해서
-// 보여주는 게 더 위험하다고 판단).
+// 2026-09-02(4): 실사용자가 반려된 건의 "원본 데이터 보기"로 직접 확인해서
+// 알려준 필드명 — 반려 사유는 recaResn에 온다("입영통지서 일부분이 아닌,
+// 전체 파일을 업로드해 주세요." 같은 텍스트로 확인됨). 이제 이 필드를
+// 최우선으로 쓰고, 혹시 다른 반려 유형에서 다른 필드명이 쓰이는 경우까지
+// 대비해서 예전 휴리스틱 추정도 폴백으로 남겨둔다.
+const KNOWN_REASON_KEY = "recaResn";
 const REASON_KEY_HINTS = ["rsn", "cmnt", "rmrk", "sayu", "bigo", "memo", "desc", "reason"];
 function guessRejectReason(rawRow) {
   if (!rawRow || typeof rawRow !== "object") return null;
+  if (typeof rawRow[KNOWN_REASON_KEY] === "string" && rawRow[KNOWN_REASON_KEY].trim()) {
+    return { key: KNOWN_REASON_KEY, value: rawRow[KNOWN_REASON_KEY], confirmed: true };
+  }
   for (const [key, value] of Object.entries(rawRow)) {
     if (["accpObjGbnNm", "accpGbnNm", "empNm"].includes(key)) continue;
     if (typeof value !== "string" || !value.trim()) continue;
     const lowerKey = key.toLowerCase();
-    if (REASON_KEY_HINTS.some((hint) => lowerKey.includes(hint))) return { key, value };
+    if (REASON_KEY_HINTS.some((hint) => lowerKey.includes(hint))) return { key, value, confirmed: false };
   }
   return null;
 }
@@ -251,7 +253,10 @@ function StageRow({ stage }) {
         <div className="mt-1.5 pt-1.5 border-t border-status-red/15">
           {guessedReason ? (
             <p className="text-status-red text-[12px]">
-              사유(추정 — 원본 필드 <code className="text-[11px]">{guessedReason.key}</code>): {guessedReason.value}
+              반려 사유: {guessedReason.value}
+              {!guessedReason.confirmed && (
+                <span className="text-brand-muted text-[10.5px]"> (필드 {guessedReason.key} 추정값)</span>
+              )}
             </p>
           ) : (
             <p className="text-brand-muted text-[11.5px]">

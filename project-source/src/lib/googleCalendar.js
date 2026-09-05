@@ -51,16 +51,25 @@ function nextDateStr(dateStr) {
 
 /**
  * 구글 캘린더에 종일(all-day) 일정을 등록한다.
+ * ⚠️ 2026-09-05 수정: 캐시된 토큰이 만료/무효화되면 서버가 401을 주는데,
+ * removeCachedToken()이 있으면서도 아무 데서도 호출을 안 해서 나쁜 토큰이
+ * 캐시에 계속 남아 재시도해도 똑같이 실패하기만 하는 문제가 있었다. 이제
+ * 401을 받으면 그 토큰을 캐시에서 지우고 한 번만 자동으로 새 토큰을 받아
+ * 재시도한다 — 그래도 실패하면(진짜 권한 문제 등) 에러를 그대로 던진다.
  * @param {{title: string, date: string, description?: string}} params date는 YYYY-MM-DD
  * @returns {Promise<Object>} 생성된 이벤트 리소스
  */
 export async function createGoogleCalendarEvent({ title, date, description }) {
+  return createEventWithTokenRetry({ title, date, description }, 1);
+}
+
+async function createEventWithTokenRetry(params, retriesLeft) {
   const token = await getGoogleAuthToken(true);
   const event = {
-    summary: title,
-    description,
-    start: { date }, // 종일 이벤트 (YYYY-MM-DD)
-    end: { date: nextDateStr(date) }, // end.date는 배타적 — 마감일 다음 날을 넣어야 함
+    summary: params.title,
+    description: params.description,
+    start: { date: params.date }, // 종일 이벤트 (YYYY-MM-DD)
+    end: { date: nextDateStr(params.date) }, // end.date는 배타적 — 마감일 다음 날을 넣어야 함
   };
   const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
@@ -69,6 +78,13 @@ export async function createGoogleCalendarEvent({ title, date, description }) {
   });
   if (!res.ok) {
     const errText = await res.text();
+    // 401 = 토큰이 만료/무효화됐을 가능성이 큼. 캐시를 지우고 한 번만 재시도 —
+    // 재시도에서도 401이면(계정 권한 회수 등 진짜 문제) 더 반복하지 않고 던진다.
+    if (res.status === 401 && retriesLeft > 0) {
+      console.warn("[googleCalendar] 401 응답 — 캐시된 토큰을 지우고 한 번 재시도합니다.");
+      await removeCachedToken(token);
+      return createEventWithTokenRetry(params, retriesLeft - 1);
+    }
     throw new Error(`캘린더 등록 실패 (HTTP ${res.status}): ${errText}`);
   }
   return res.json();

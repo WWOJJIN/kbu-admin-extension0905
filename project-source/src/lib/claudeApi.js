@@ -3,15 +3,10 @@
 // (코딩 규칙: api.anthropic.com 직접 호출 금지, API 키를 확장 코드/manifest에 절대
 // 포함하지 않음 — Claude API 호출은 이 파일에서만 수행)
 //
-// ⚠️ 2026-09-05: 프록시 서버(Cloudflare Worker) 코드는 project-source/proxy/에
-// 작성 완료. 배포는 proxy/README.md 절차(Cloudflare 대시보드 수동 배포 — 이 세션
-// 환경에서 wrangler CLI가 Cloudflare API에 못 붙어서 대시보드 방식으로 진행)를
-// 따를 것. 배포 후 아래 PROXY_URL만 실제 workers.dev 주소로 채우면 나머지 코드는
-// 그대로 동작함. PROXY_SECRET은 proxy/.dev.vars 및 Cloudflare 대시보드 시크릿과
-// 반드시 동일한 값으로 이미 채워둠(2026-09-05 생성) — 값을 바꾸려면 세 군데
-// (여기, proxy/.dev.vars, Cloudflare 대시보드 시크릿)를 같이 바꿔야 함.
+// 2026-09-05: 프록시 서버(Cloudflare Worker, proxy/) 배포 완료 (W님 작업).
+// PROXY_SECRET은 proxy/.dev.vars 및 Cloudflare 대시보드 시크릿과 반드시 같은 값이어야 함.
 
-const PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev"; // 2026-09-05 배포 완료(Cloudflare 대시보드)
+const PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev";
 const PROXY_SECRET_HEADER = "x-proxy-secret";
 const PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 
@@ -24,7 +19,8 @@ const SYSTEM_PROMPT = [
   '- requires_action (boolean): 수신자가 회신/제출/조치를 해야 하는 문서인지',
   '- action_description (string 또는 null): 필요한 조치 내용 한 줄 설명, 없으면 null',
   '- summary (string): 문서 핵심 내용 요약. 반드시 3줄 이내(줄바꿈 최대 2번)로, 각 줄은 공백 포함 40자 이내로 간결하게 작성. 3줄을 넘기거나 장황하게 풀어 쓰지 말 것.',
-].join("\n");
+].join("\n"); // 2026-09-05(2): 필드 스펙 + 3줄 제약 명시 안 하면 summary가 무제한으로 길어지는
+// 문제가 있어서(실사용 리포트) 추가함 — W님이 doc_id 캐싱을 추가한 버전 위에 병합.
 
 /**
  * @typedef {Object} ParsedCoopDoc
@@ -40,18 +36,23 @@ const SYSTEM_PROMPT = [
  * 협조문 원문을 프록시 경유 Claude API로 파싱한다.
  * 실패 시 1회 재시도, 그래도 실패하면 에러를 던진다 (에러 토스트 표시는 호출부 책임).
  * @param {string} rawText
+ * @param {string} [aprvNo]  협조문 고유 결재번호. 프록시 쪽에서 여러 사용자가
+ *   같은 문서를 각자 파싱하지 않도록 캐시 키로 쓰라고 같이 보낸다 — 학교
+ *   전체에서 같은 협조문을 한 번만 Claude API로 파싱하게 하려는 목적.
+ *   (2026-09-05 추가: team_plan_summary.docx 6절 "같은 문서 중복 파싱 비용"
+ *   대응 — 프록시 쪽 캐싱 구현은 프록시 담당자(W)가 맡음)
  * @returns {Promise<ParsedCoopDoc>}
  */
-export async function parseCoopDoc(rawText) {
+export async function parseCoopDoc(rawText, aprvNo) {
   if (!PROXY_URL) {
     throw new Error(
       "[claudeApi] 프록시 서버 URL이 아직 설정되지 않음 (proxy/ 배포 후 PROXY_URL을 채울 것)"
     );
   }
-  return callProxyWithRetry(rawText, 1);
+  return callProxyWithRetry(rawText, aprvNo, 1);
 }
 
-async function callProxyWithRetry(rawText, retries) {
+async function callProxyWithRetry(rawText, aprvNo, retries) {
   try {
     const res = await fetch(PROXY_URL, {
       method: "POST",
@@ -63,6 +64,10 @@ async function callProxyWithRetry(rawText, retries) {
         model: "claude-haiku-4-5",
         system: SYSTEM_PROMPT,
         text: rawText,
+        // 캐시 키용 문서 고유 ID. 프록시가 이 값으로 "이미 파싱한 문서인지"
+        // 먼저 확인하고, 있으면 Claude API 호출 없이 캐시된 결과를 돌려주는
+        // 방식을 기대함 — 값이 없어도(aprvNo 미전달) 요청 자체는 그대로 동작.
+        doc_id: aprvNo ?? null,
       }),
     });
     if (!res.ok) throw new Error(`프록시 요청 실패: ${res.status} ${res.statusText}`);
@@ -70,7 +75,7 @@ async function callProxyWithRetry(rawText, retries) {
     return normalizeParsedDoc(data);
   } catch (err) {
     if (retries > 0) {
-      return callProxyWithRetry(rawText, retries - 1);
+      return callProxyWithRetry(rawText, aprvNo, retries - 1);
     }
     throw err;
   }
