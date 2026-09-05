@@ -96,10 +96,20 @@ export default {
       );
     }
 
+    // 2026-09-05(3) 수정: 캐시 키에 system 프롬프트 해시를 포함시킴. 이전엔
+    // doc_id만으로 캐시 키를 만들어서, 프롬프트를 고쳐도(예: summary 길이/톤
+    // 조정) 예전 프롬프트로 파싱해서 캐시된 문서는 30일 TTL 동안 계속 옛날
+    // 결과를 그대로 돌려주는 버그가 있었음(실사용 리포트: "AI가 본문을 그대로
+    // 가져온다"). 이제는 system 프롬프트 내용이 바뀌면 캐시 키도 자동으로
+    // 달라져서 예전 캐시는 그냥 안 쓰이게 되고(=사실상 자동 무효화), 새
+    // 프롬프트로 다시 파싱된다. (클라이언트 쪽 ai_summary_prompt_version +
+    // 일괄 재요약 기능과는 별개의, 서버 쪽 이중 안전장치.)
+    const systemPrompt = system || DEFAULT_SYSTEM_PROMPT;
+
     // doc_id가 왔으면 캐시부터 확인 — 같은 문서를 다른 직원이 먼저 파싱해뒀으면
     // Claude API를 아예 안 부르고 그 결과를 그대로 돌려준다.
     const cache = caches.default;
-    const cacheKey = docId ? buildCacheKey(docId) : null;
+    const cacheKey = docId ? await buildCacheKey(docId, systemPrompt) : null;
     if (cacheKey) {
       const cached = await cache.match(cacheKey);
       if (cached) {
@@ -112,7 +122,7 @@ export default {
       const parsed = await callClaude({
         apiKey: env.ANTHROPIC_API_KEY,
         model: model || DEFAULT_MODEL,
-        system: system || DEFAULT_SYSTEM_PROMPT,
+        system: systemPrompt,
         text,
       });
 
@@ -136,14 +146,33 @@ export default {
 };
 
 /**
- * doc_id를 Cache API가 요구하는 Request 키(유효한 URL 형태)로 변환한다.
- * 실제로 이 URL로 네트워크 요청이 나가지는 않음 — 캐시 매칭 전용 키일 뿐.
+ * doc_id + system 프롬프트 해시를 Cache API가 요구하는 Request 키(유효한 URL
+ * 형태)로 변환한다. 실제로 이 URL로 네트워크 요청이 나가지는 않음 — 캐시 매칭
+ * 전용 키일 뿐. 프롬프트 해시를 섞어 넣은 이유: 프롬프트를 고칠 때마다 캐시 키가
+ * 자동으로 달라지게 해서, 예전 프롬프트로 파싱된 캐시가 새 프롬프트 적용 후에도
+ * 계속 서빙되는 문제(스테일 캐시)를 원천 차단하기 위함.
  * @param {string} docId
- * @returns {Request}
+ * @param {string} systemPrompt
+ * @returns {Promise<Request>}
  */
-function buildCacheKey(docId) {
+async function buildCacheKey(docId, systemPrompt) {
   const safeId = encodeURIComponent(String(docId));
-  return new Request(`https://cache.internal/parsed-doc/${safeId}`);
+  const promptHash = await sha256Hex(systemPrompt);
+  return new Request(`https://cache.internal/parsed-doc/${safeId}/${promptHash.slice(0, 16)}`);
+}
+
+/**
+ * 문자열의 SHA-256 해시를 16진수 문자열로 반환한다(Workers 런타임에 내장된
+ * Web Crypto API인 crypto.subtle 사용, 별도 라이브러리 불필요).
+ * @param {string} text
+ * @returns {Promise<string>}
+ */
+async function sha256Hex(text) {
+  const data = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**

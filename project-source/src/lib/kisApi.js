@@ -59,7 +59,7 @@
 //   있음(CoopDetailModal.jsx 안내 문구 참고).
 
 // 5단계(kbu-assistant 이식): 부서코드 자동수집/겸직 부서코드 필터링에 사용.
-import { getMeta, setMeta } from "./db.js";
+import { getMeta, setMeta, getDeptCodes } from "./db.js";
 
 const BASE_URL = "https://kis.kbu.ac.kr";
 
@@ -1024,15 +1024,82 @@ async function recordDiscoveredDeptCodes(items) {
   await setMeta("discoveredDeptCodes", list);
 }
 
+// 로그인 계정의 소속 부서 코드 캐시 (fetchMyCoopDocList 전용). 세션 동안 거의
+// 안 바뀌므로 최초 1회만 조회하고 재사용한다. 조회 실패 시 null로 남겨둬서
+// 다음 폴링에서 재시도되게 한다 (아래 fetchMyCoopDocList 참고).
+let cachedMyDeptCodes = null;
+
 /**
- * ERP 협조문수신함 응답을 그대로 반환한다.
- * 소속/발령 부서(DS_DEPT)는 수신 가능한 부서 전체가 아니다.
- * 수신 행의 rcvDeptCd를 소속 또는 수동 부서 목록으로 제한하면
- * 겸직/이전 조직 등으로 수신한 정상 문서가 저장 전에 누락된다.
- * 조회 조건과 서버의 세션 권한은 기존 협조문수신함 요청을 유지한다.
+ * "협조문 수신함" 화면에 나에게 온 것만 보이도록, 전사문서열람 결과를 내
+ * 소속 부서 범위로 걸러서 반환한다.
+ *
+ * ⚠️ 2026-08-23(7): "전사문서열람 하지 말고 협조문수신함/내부결재현황/
+ * 지출결재하기 딱 나에게 온 것만"이라는 요청으로 추가. 협조문수신함 화면에
+ * 이미 있는 "부서" 드롭다운과 같은 데이터 소스(findPersOfrdDeptList.do =
+ * fetchPersOfrdDeptList())를 그대로 재사용한다 — 다만 예전(8/22 이전)처럼
+ * 부서마다 fetchCoopDocList를 순회 호출하는 방식으로 돌아가지는 않는다. 그
+ * 방식은 요청을 6번 연달아 보내서, 그중 하나만 삐끗해도 postDataset이
+ * "세션 만료"로 오판하는 문제가 있었다(바로 위 fetchCoopDocListAllDepts
+ * 주석 참고). 그래서 네트워크 요청은 여전히 fetchCoopDocListAllDepts() 딱
+ * 1번만 보내고(docDeptCd는 서버에서 실제로 필터링하지 않는다는 게 실측
+ * 확인됐으므로 전사문서열람 모드로 불러도 결과는 동일), 그 응답 Row의
+ * rcvDeptCd(수신부서, 실제 값)가 내 소속 부서 목록에 있는 것만 자바스크립트
+ * 단에서 걸러낸다. 소속 부서 목록 조회(fetchPersOfrdDeptList)는 세션 동안
+ * 딱 1번만 하고 캐시해서 재사용 — 매 폴링마다 다시 부르지 않는다.
+ *
+ * 부서 목록 조회 자체가 실패하면(드물게 있을 수 있는 일시적 오류) 걸러낼
+ * 기준이 없으므로, 이번 폴링만 필터링 없이 전체를 그대로 반환한다 — "일부
+ * 문서를 놓친다"보다 "이번 한 번은 범위 밖 문서가 섞여 보인다"가 더 안전한
+ * 실패 방식이라 판단함. 이 실패는 여기서 조용히 삼켜지고(catch), 위쪽
+ * pollCoopDocs()의 SESSION_EXPIRED 판정에는 영향을 주지 않는다 — 세션은
+ * 멀쩡한데 이 보조 조회 하나 실패했다고 "세션 만료" 알림이 뜨면 안 되니까.
+ * @returns {Promise<Array<Object>>}
  */
 export async function fetchMyCoopDocList() {
-  return fetchCoopDocListAllDepts();
+  const listItems = await fetchCoopDocListAllDepts();
+
+  if (!cachedMyDeptCodes) {
+    try {
+      const depts = await fetchPersOfrdDeptList();
+      cachedMyDeptCodes = new Set(depts.map((d) => d.code).filter(Boolean));
+    } catch (err) {
+      console.warn(
+        "[kisApi] 소속 부서 목록(fetchPersOfrdDeptList) 조회 실패 — 이번 폴링은 필터링 없이 전체 반환:",
+        err
+      );
+      return listItems;
+    }
+  }
+
+  // 5단계(kbu-assistant "겸직 부서 코드" 이식): 자동 조회된 소속 부서 목록에
+  // 안 잡히는 겸직 부서가 있을 수 있어서(예: 겸무 발령이 fetchPersOfrdDeptList
+  // 응답에 안 오는 경우), 설정 탭에서 수동으로 등록한 부서 코드도 항상
+  // 허용 목록에 합쳐서 걸러낸다. ERP 재조회 없이 순수 필터링만 늘어나는
+  // 거라 안정성에 영향 없음.
+  let manualCodes = [];
+  try {
+    manualCodes = (await getDeptCodes()).map((d) => d.code).filter(Boolean);
+  } catch (err) {
+    console.warn("[kisApi] 수동 부서 코드 조회 실패(무시하고 자동발견 목록만 사용):", err);
+  }
+
+  // ⚠️ 2026-09-02(2) 되돌림: 바로 전 수정에서 "화이트리스트 토글을 켜면
+  // 수동 등록 목록만 쓴다(자동조회 목록은 버림)"로 바꿨었는데, 실사용
+  // 중 "내 수신부서인데 안 불러와진다" 참사로 이어졌다(ERP 부서 드롭다운이
+  // 실제로 필터링을 안 해서, 한 계정이 받는 수신부서가 겸직/발령에 따라
+  // 계속 늘어날 수 있는데 수동 목록이 그걸 다 못 따라감). 이 프로젝트가
+  // 계속 지켜온 원칙("일부 문서를 놓친다"보다 "범위 밖 문서가 섞여 보이는"
+  // 쪽이 훨씬 안전하다)과 정면으로 부딪히는 위험한 동작이었다.
+  // 그래서 토글 상태와 무관하게 자동조회 목록은 항상 허용 목록에 포함시키고,
+  // 수동 등록 부서는 항상 "추가" 용도로만 쓴다 — 절대로 자동조회 결과를
+  // 대체(=narrower)하지 못한다. getRestrictToManualDepts 토글 자체는 이제
+  // 아무 효과가 없다(SettingsPage.jsx에서도 뺐다) — "화이트리스트 전용"
+  // 모드는 이 앱에서 안전하게 구현할 방법이 없다고 판단해서 완전히 없앴다.
+  const allowedCodes = new Set([...cachedMyDeptCodes, ...manualCodes]);
+
+  if (allowedCodes.size === 0) return listItems; // 소속 부서가 하나도 안 잡히면(이상 케이스) 걸러낼 근거가 없으니 전체 반환
+
+  return listItems.filter((item) => item.rcvDeptCd && allowedCodes.has(item.rcvDeptCd));
 }
 
 /** 지출출장결재현황 목록(내가 기안한 것). 별도 필터 없이 세션 컨텍스트로 호출됨. */

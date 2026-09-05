@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "대학 행정 어시스턴트",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "ERP 협조문 자동 수신·AI 파싱·캘린더 통합·인수인계 챗봇 제공하는 대학 행정직원용 확장프로그램.",
   "permissions": ["alarms", "notifications", "storage", "tabs", "identity"],
   "host_permissions": [

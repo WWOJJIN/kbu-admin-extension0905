@@ -214,8 +214,14 @@ let statusChangePollInProgress = false;
 
 /**
  * 1분마다(또는 설치 직후) 실행되는 협조문수신함 폴링 사이클.
- * ERP가 반환한 협조문수신함 전체를 저장·비교한다.
- * 소속 부서 목록은 수신 권한 목록이 아니므로 추가 필터로 사용하지 않는다.
+ * ⚠️ 2026-08-23(7): "전사문서열람 하지 말고 협조문수신함에 나에게 온 것만"
+ * 요청으로, fetchCoopDocListAllDepts() 대신 fetchMyCoopDocList()를 쓴다.
+ * 네트워크 요청은 여전히 1번만 보내되(부서별 순회 호출로 돌아가지 않음 —
+ * 예전에 그 방식이 "요청 6개 중 하나만 삐끗해도 세션 만료로 오판"하는
+ * 문제를 냈었다), 응답을 협조문수신함 화면의 "부서" 드롭다운과 같은 소스
+ * (fetchPersOfrdDeptList, 내 소속 부서 목록)로 클라이언트에서 걸러서 내
+ * 소속 부서로 온 문서만 새 문서/알림 판단에 포함시킨다. 자세한 이유는
+ * kisApi.js의 fetchMyCoopDocList 주석 참고.
  */
 export async function pollCoopDocs() {
   if (coopPollInProgress) {
