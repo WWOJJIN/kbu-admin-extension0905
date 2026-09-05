@@ -110,6 +110,19 @@ function FormattedBody({ text }) {
   ));
 }
 
+// 2026-09-05(7) 추가: CoopCard.jsx와 동일한 이유/규칙으로 상세 팝업의 AI
+// 요약도 문장이 여러 개면 "- "로 시작하는 줄 목록으로 나눠서 보여줌(가독성
+// 개선 요청). 문장이 1개면 원래대로 문단 그대로.
+function formatSummaryForReadability(text) {
+  if (!text) return text;
+  const sentences = text
+    .split(/(?<=[.!?다요함음])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (sentences.length <= 1) return text;
+  return sentences.map((s) => `- ${s}`).join("\n");
+}
+
 export default function CoopDetailModal({ docId }) {
   const closeDetail = useStore((s) => s.closeDetail);
   const completeDoc = useStore((s) => s.completeDoc);
@@ -200,7 +213,7 @@ export default function CoopDetailModal({ docId }) {
                 )}
               </div>
             )}
-            <p className="whitespace-pre-line">{doc.ai_summary}</p>
+            <p className="whitespace-pre-line">{formatSummaryForReadability(doc.ai_summary)}</p>
           </div>
         )}
 

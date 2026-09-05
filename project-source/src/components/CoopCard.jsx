@@ -135,6 +135,23 @@ function StatusBadge({ doc }) {
   return null;
 }
 
+// 2026-09-05(7) 추가: "3문장으로 길게 나오는 건 하이픈 사용 등 해서
+// 가독성있게 해줘" 요청 — claudeApi.js의 enforceShortText가 새로 파싱되는
+// 문서는 한 문장으로 잘라주지만, 그 로직이 생기기 전(프롬프트 버전 낮음)에
+// 이미 저장된 구 요약은 여러 문장이 붙은 산문형 그대로 남아있어 한 문단으로
+// 뭉쳐 보이면 가독성이 떨어짐. 표시 시점에 문장 단위(claudeApi.js와 동일한
+// 문장 경계 규칙)로 나눠서, 문장이 2개 이상이면 각 줄 앞에 "- "를 붙인
+// 목록 형태로 보여줌. 문장이 1개면(정상 케이스) 그대로 문단으로 표시.
+function formatSummaryForReadability(text) {
+  if (!text) return text;
+  const sentences = text
+    .split(/(?<=[.!?다요함음])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (sentences.length <= 1) return text;
+  return sentences.map((s) => `- ${s}`).join("\n");
+}
+
 export default function CoopCard({ doc, onClick, expanded = true }) {
   // 2026-09-05 수정: ai_summary가 비어서 mockSummarize(본문 앞부분을 그냥 잘라낸
   // 발췌, AI 아님)로 대체되는 경우에도 라벨이 계속 "AI Summary"로 고정 표시돼서
@@ -283,7 +300,7 @@ export default function CoopCard({ doc, onClick, expanded = true }) {
                 isRealAiSummary ? "text-[#3D57E8]" : "text-[#6B7280]"
               }`}
             >
-              {summaryText || "요약 불가"}
+              {formatSummaryForReadability(summaryText) || "요약 불가"}
             </div>
           </div>
         )}
