@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import useStore from "../store/useStore.js";
-import CoopCard from "./CoopCard.jsx";
+import CoopTimelineItem from "./CoopTimelineItem.jsx";
 // CoopDetailModal은 App.jsx로 옮김 — 브리핑 탭 등 다른 탭에서 문서를 열어도
 // 탭 이동 없이 그 자리에서 팝업이 뜨도록 selectedDocId 기준으로 항상 마운트됨
 // (2026-08-23(2)).
@@ -204,16 +204,14 @@ export default function CoopPage() {
             : "이 부서에 해당하는 협조문이 없습니다."}
         </p>
       ) : (
-        // 2026-08-22(9): 접기/펼치기(설정 탭) 기능이 생기면서 같은 행에 접힌
-        // 카드와 펼쳐진 카드가 섞일 수 있음 — grid 기본 stretch를 쓰면 접힌
-        // 카드도 옆의 펼쳐진 카드 높이에 맞춰 억지로 늘어나(빈 여백만 생김)
-        // "AI요약 부분만 접힌다"는 의도가 깨짐. items-start로 각 카드가 자기
-        // 내용 높이만큼만 차지하게 함(CoopCard.jsx의 h-full도 같이 제거).
-        // 펼쳐진 카드끼리는 AI요약 본문이 고정 높이(h-[96px])라 어차피 서로
-        // 크기가 맞음.
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-          {pageDocs.map((doc) => (
-            <CoopCard
+        // 2026-09-05: "타임라인형으로 가보자" 요청 — 그리드 카드 대신 접수일
+        // 순서를 세로선으로 이어서 보여주는 CoopTimelineItem으로 교체
+        // (preview_layout_styles.html ④안 채택). max-w로 폭을 좁혀서 타임라인
+        // 한 줄이 너무 길게 늘어나지 않게 함. isLast만 넘겨서 마지막 항목
+        // 아래로는 연결선이 허공에 뜨지 않게 함.
+        <div className="max-w-2xl mx-auto">
+          {pageDocs.map((doc, idx) => (
+            <CoopTimelineItem
               key={doc.id}
               doc={doc}
               onClick={() => openDetail(doc.id)}
@@ -221,6 +219,7 @@ export default function CoopPage() {
               // 닫아버려" 요청 — 카드 개별 토글 없이, 지금 보고 있는 탭
               // (newFilter)에 따라 AI요약 펼침 여부를 일괄로 정함.
               expanded={newFilter === "new"}
+              isLast={idx === pageDocs.length - 1}
             />
           ))}
         </div>
