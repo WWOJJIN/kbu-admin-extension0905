@@ -209,7 +209,9 @@ export default function CoopPage() {
         // (preview_layout_styles.html ④안 채택). max-w로 폭을 좁혀서 타임라인
         // 한 줄이 너무 길게 늘어나지 않게 함. isLast만 넘겨서 마지막 항목
         // 아래로는 연결선이 허공에 뜨지 않게 함.
-        <div className="max-w-2xl mx-auto">
+        // 2026-09-05: "카드 너비를 더 길게 해줘봐" 요청 — 제목이 좁은 폭 때문에
+        // 두 줄로 어색하게 꺾이는 문제 해결 위해 max-w-2xl(672px) → max-w-4xl(896px)로 확장.
+        <div className="max-w-4xl mx-auto">
           {pageDocs.map((doc, idx) => (
             <CoopTimelineItem
               key={doc.id}
