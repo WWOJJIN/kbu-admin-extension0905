@@ -10,6 +10,38 @@ import CoopCard from "./CoopCard.jsx";
 import DeptFilterSelect from "./DeptFilterSelect.jsx";
 import { mockSummarize, fetchPersOfrdDeptList } from "../lib/kisApi.js";
 
+// 2026-09-02: "신규"는 이번 달(달력 기준 1일~말일)에 온 문서만 뜨는 걸로
+// 확정 — 그 전엔 "최근 30일" 식으로 매일 굴러가는 창(rolling window)을
+// 썼는데, 이러면 예를 들어 오늘이 9/2일 때 8/5에 온 문서도 "최근 30일 이내"
+// 라서 신규로 잡혀버리는 등 "이번 달"이라는 말과 실제 동작이 달랐다. 이제는
+// 문서의 기안일(date)이 오늘과 같은 연/월이면만 신규로 본다.
+// ⚠️ 2026-09-02 버그 수정도 같이 반영: 결재 경유가 길어서 기안일 자체는
+// 지난달 이전인데 이 앱엔 방금 막(is_new:true) 처음 들어온 문서가 "신규"
+// 표시 없이 곧장 이미 열람한 것처럼 보이는 문제가 있었다 — 한 번도 안 읽은
+// 문서(is_new)는 기안월과 무관하게 항상 신규로 취급한다.
+function isRecentDoc(doc) {
+  // 2026-09-02(2): "신규는 이번 달 것만"이라는 요구를 is_new(읽음 여부) 예외로
+  // 어겼던 회귀 수정. 이전 시도는 "결재 경유가 길어서 기안일은 지난달인데 방금
+  // 막 들어온 문서"를 구제하려고 doc.is_new(한 번도 안 읽음)면 무조건 신규로
+  // 봤는데, is_new는 "사용자가 아직 열어본 적 없다"는 뜻일 뿐 "최근에 왔다"는
+  // 뜻이 아니라서, 몇 달 전에 들어왔지만 굳이 클릭 안 하고 넘어간 공지성
+  // 문서까지 전부 계속 "신규"로 남는 문제가 있었다(원래 리포트가 바로 이
+  // 증상). 대신 이 앱이 그 문서를 실제로 처음 저장한 시점(created_at, 폴링
+  // 때마다 자동 기록됨)이 이번 달인지로 판단한다 — "결재 경유가 길어 기안일
+  // 자체는 지난달인데 이번 달에 처음 이 앱에 잡힌 문서"는 여전히 신규로
+  // 뜨고, "그냥 몇 달 전에 들어왔는데 안 열어본 문서"는 더 이상 신규로 안
+  // 뜬다.
+  const now = new Date();
+  if (doc.created_at) {
+    const created = new Date(doc.created_at);
+    if (created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth()) return true;
+  }
+  if (!doc.date) return false;
+  const target = new Date(`${doc.date}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return false;
+  return target.getFullYear() === now.getFullYear() && target.getMonth() === now.getMonth();
+}
+
 // 3열 × 4줄 = 12개씩 페이지네이션.
 const PAGE_SIZE = 12;
 // 2026-08-22(10): 페이지 번호 버튼을 한 번에 4개씩만 보여주고(1~4, 5~8, ...),
@@ -26,11 +58,13 @@ export default function CoopPage() {
   const selectedDeptGroupKey = useStore((s) => s.selectedDeptGroupKey);
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
-  // 2026-09-05(8): "신규20이랑 전체랑 합쳐서 전체로 만들어줘" 요청 —
-  // 신규/전체 클릭 탭(newFilter)을 완전히 없애고 항상 전체 문서를 한
-  // 목록으로 보여줌. NEW 배지 자체(카드에 뜨는 표시, isRecentDoc 기준)는
-  // 목록 필터링과 별개 로직이라 그대로 남아있음 — 없어지는 건 "신규만
-  // 걸러서 보기" 기능뿐.
+  // 2026-08-23(4): "신규/전체를 클릭 필터로" 요청 — 한 화면에 신규/처리완료를
+  // 다 늘어놓는 대신 탭처럼 눌러서 거른다. "전체"를 눌러도 NEW 배지는 카드에
+  // 그대로 남아있음(is_new 값 자체를 안 건드리고 목록만 거르는 거라).
+  // 2026-08-23(11): "협조문 탭 처음 누르면 신규가 기본값" 요청 — 처음 진입 시
+  // "신규"가 먼저 보이게 초기값을 바꿈("전체"를 눌러도 NEW 배지 자체는 그대로
+  // 남아있는 동작은 그대로 유지).
+  const [newFilter, setNewFilter] = useState("new"); // "all" | "new"
   // 2026-08-23(14): 아래 availableDepts 참고 — ERP "findPersOfordDeptList.do"
   // (내 소속 부서 전체) 응답을 담아둠. 문서 유무와 무관하게 항상 ERP
   // 드롭다운과 똑같은 부서 목록을 보여주기 위한 보조 상태.
@@ -57,7 +91,18 @@ export default function CoopPage() {
   // coopDocs 쪽 이름과 합쳐서 보여주므로 화면이 깨지진 않는다.
   useEffect(() => {
     fetchPersOfrdDeptList()
-      .then((depts) => setMyDeptNames(depts.map((d) => d.name).filter(Boolean)))
+      .then((depts) => {
+        // 2026-09-05 추가: 실패했을 때만 로그가 남고 성공했을 땐 아무것도 안
+        // 찍혀서, "호출 자체가 실패한 건지 / 성공은 했는데 원래 이 계정엔
+        // 몇 개 안 나온 건지" 콘솔만 보고는 구분이 안 되는 문제가 있었음
+        // (실사용 리포트: "부서가 2개만 뜨는데 콘솔엔 에러가 없다"). 성공
+        // 케이스도 항상 로그를 남겨서 원인을 바로 구분할 수 있게 함.
+        console.log(
+          `[CoopPage] 소속 부서 목록(findPersOfordDeptList) 조회 성공 — ${depts.length}건:`,
+          depts.map((d) => `${d.name}(${d.code})`)
+        );
+        setMyDeptNames(depts.map((d) => d.name).filter(Boolean));
+      })
       .catch((err) => console.warn("[CoopPage] 소속 부서 목록(findPersOfordDeptList) 조회 실패 — 문서 기반 목록만 사용:", err));
   }, []);
 
@@ -84,7 +129,8 @@ export default function CoopPage() {
   const deptFilteredDocs = selectedDeptGroupKey
     ? coopDocs.filter((d) => d.recv_dept_name === selectedDeptGroupKey)
     : coopDocs;
-  const scopedDocs = deptFilteredDocs;
+  const newCount = coopDocs.filter(isRecentDoc).length;
+  const scopedDocs = newFilter === "new" ? deptFilteredDocs.filter(isRecentDoc) : deptFilteredDocs;
 
   // 2026-08-22(6): 검색창 — 버튼 없이 입력하는 즉시(onChange) 필터링. 제목/
   // 발신부서/수신부서/기안자/AI요약(또는 mockSummarize 대체 요약) 전부 대상으로
@@ -113,11 +159,11 @@ export default function CoopPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedDocs, query]);
 
-  // 검색어/부서 필터가 바뀌면 1페이지로 리셋 (안 그러면 결과가 줄었는데
-  // 예전 페이지 번호에 그대로 머물러 빈 화면이 뜰 수 있음).
+  // 검색어/부서 필터/신규 필터가 바뀌면 1페이지로 리셋 (안 그러면 결과가
+  // 줄었는데 예전 페이지 번호에 그대로 머물러 빈 화면이 뜰 수 있음).
   useEffect(() => {
     setPage(1);
-  }, [query, selectedDeptGroupKey]);
+  }, [query, selectedDeptGroupKey, newFilter]);
 
   const totalPages = Math.max(1, Math.ceil(visibleDocs.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -129,6 +175,24 @@ export default function CoopPage() {
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg font-semibold text-brand-navy shrink-0">협조문수신함</h2>
+        <div className="flex items-center gap-1 bg-brand-alt rounded-lg p-0.5">
+          <button
+            onClick={() => setNewFilter("new")}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition ${
+              newFilter === "new" ? "bg-white text-brand-blue shadow-sm" : "text-brand-muted hover:text-brand-navy"
+            }`}
+          >
+            신규{newCount > 0 && ` ${newCount}`}
+          </button>
+          <button
+            onClick={() => setNewFilter("all")}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition ${
+              newFilter === "all" ? "bg-white text-brand-blue shadow-sm" : "text-brand-muted hover:text-brand-navy"
+            }`}
+          >
+            전체
+          </button>
+        </div>
       </div>
       <div className="flex items-center justify-end mb-4 gap-3">
         <div className="flex items-center gap-3 flex-1 justify-end">
@@ -144,23 +208,30 @@ export default function CoopPage() {
       </div>
       {visibleDocs.length === 0 ? (
         <p className="text-brand-muted text-sm">
-          {coopDocs.length === 0 ? "아직 수신된 협조문이 없습니다." : "이 부서에 해당하는 협조문이 없습니다."}
+          {coopDocs.length === 0
+            ? "아직 수신된 협조문이 없습니다."
+            : newFilter === "new"
+            ? "새로 온 협조문이 없습니다."
+            : "이 부서에 해당하는 협조문이 없습니다."}
         </p>
       ) : (
-        // 2026-09-05: 타임라인형을 한 번 적용했다가, "타임라인 없이 지금 카드
-        // 모양 유지해서 2열로 해줄 수 있어?" 요청으로 다시 카드 그리드로 원복.
-        // 이후 "한줄에 3개 들어가게 해줘" 요청으로 데스크톱 기준 3열로 재조정
-        // (모바일 1열 → 태블릿 2열 → 데스크톱 3열).
+        // 2026-08-22(9): 접기/펼치기(설정 탭) 기능이 생기면서 같은 행에 접힌
+        // 카드와 펼쳐진 카드가 섞일 수 있음 — grid 기본 stretch를 쓰면 접힌
+        // 카드도 옆의 펼쳐진 카드 높이에 맞춰 억지로 늘어나(빈 여백만 생김)
+        // "AI요약 부분만 접힌다"는 의도가 깨짐. items-start로 각 카드가 자기
+        // 내용 높이만큼만 차지하게 함(CoopCard.jsx의 h-full도 같이 제거).
+        // 펼쳐진 카드끼리는 AI요약 본문이 고정 높이(h-[96px])라 어차피 서로
+        // 크기가 맞음.
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
           {pageDocs.map((doc) => (
             <CoopCard
               key={doc.id}
               doc={doc}
               onClick={() => openDetail(doc.id)}
-              // 2026-09-05(8): 신규/전체 탭이 없어지면서 "탭에 따라 펼침 여부
-              // 결정" 방식도 같이 폐기 — 원래 설계(설정 탭 summarySettings)로
-              // 복귀. CoopCard.jsx가 store의 summarySettings를 직접 읽어서
-              // 카드별로 펼침 여부를 정한다(expanded prop 없이).
+              // 2026-08-23(16): "신규탭에서는 펼쳐지게 하고 전체에서는 다
+              // 닫아버려" 요청 — 카드 개별 토글 없이, 지금 보고 있는 탭
+              // (newFilter)에 따라 AI요약 펼침 여부를 일괄로 정함.
+              expanded={newFilter === "new"}
             />
           ))}
         </div>
