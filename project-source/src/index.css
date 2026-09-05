@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* kbu-assistant css/style.css 기준 전역 톤 이식 */
+html, body {
+  background: #F5F7FF; /* brand-alt */
+  color: #1A1B2E; /* brand-navy */
+}

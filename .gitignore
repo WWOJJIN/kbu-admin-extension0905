@@ -1,0 +1,14 @@
+# 의존성 (npm install로 재생성됨)
+node_modules/
+
+# 로컬 환경변수 / 비밀값 (프록시 서버 작업 시 여기에 API 키 등이 들어갈 수 있음)
+.env
+.env.*
+.dev.vars
+.wrangler/
+
+# OS/에디터
+.DS_Store
+Thumbs.db
+*.log
+.vscode/

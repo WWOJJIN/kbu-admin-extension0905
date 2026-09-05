@@ -1,0 +1,365 @@
+// src/components/SettingsPage.jsx
+// 설정 탭. 2026-08-22 추가 — 협조문 카드의 AI요약을 언제 펼쳐/접어 보여줄지
+// 3가지 정책 중 고르게 함(useStore.js summarySettings). CoopCard.jsx가 이
+// 값을 읽어서 카드별 펼침/접힘을 결정함.
+
+import { useEffect, useState } from "react";
+import useStore from "../store/useStore.js";
+import {
+  getFeatureToggles,
+  setFeatureEnabled,
+  getDeptCodes,
+  setDeptCodes,
+  getMeta,
+  getAutoDetailFetchOnArrival,
+  setAutoDetailFetchOnArrival,
+} from "../lib/db.js";
+
+const WEEK_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
+
+// 5단계(kbu-assistant 이식): 탭 켜고 끄기 목록. Navbar.jsx의 TABS와 key를
+// 맞춰야 실제로 숨겨진다. "settings"는 여기서 뺐다 — 설정 탭 자체를 끄면
+// 다시 켤 방법이 없어지므로 항상 보이게 둔다(kbu 원본도 동일한 이유로
+// FEATURE_TAB_IDS에서 자기 자신은 제외).
+const FEATURE_TAB_ITEMS = [
+  { key: "briefing", label: "브리핑" },
+  { key: "coop", label: "협조문" },
+  { key: "approval", label: "결재현황" },
+  { key: "calendar", label: "캘린더" },
+  { key: "chat", label: "챗봇" },
+  { key: "status", label: "학적변동" },
+];
+
+function FeatureTogglesSection() {
+  const [toggles, setToggles] = useState(null);
+
+  useEffect(() => {
+    getFeatureToggles().then(setToggles);
+  }, []);
+
+  if (!toggles) return null;
+
+  const toggle = async (key) => {
+    const next = await setFeatureEnabled(key, !toggles[key]);
+    setToggles(next);
+  };
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-sm font-semibold text-brand-navy mb-1">탭 켜고 끄기</h3>
+      <p className="text-xs text-brand-muted mb-3">안 쓰는 기능은 꺼서 네브바를 간단하게 유지할 수 있어요.</p>
+      <div className="flex flex-col gap-1.5">
+        {FEATURE_TAB_ITEMS.map((item) => (
+          <label
+            key={item.key}
+            className="flex items-center justify-between border border-brand-border rounded-lg px-3.5 py-2.5 cursor-pointer hover:bg-brand-alt"
+          >
+            <span className="text-sm text-brand-navy">{item.label}</span>
+            <input
+              type="checkbox"
+              checked={toggles[item.key] !== false}
+              onChange={() => toggle(item.key)}
+              className="w-4 h-4"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 2026-09-02 추가: 새 협조문 도착 시 상세를 자동으로 가져와 AI 요약을 만들지
+// 여부. 기본은 꺼짐(false) — db.js getAutoDetailFetchOnArrival 주석 참고.
+function AutoDetailFetchSection() {
+  const [enabled, setEnabled] = useState(null);
+
+  useEffect(() => {
+    getAutoDetailFetchOnArrival().then(setEnabled);
+  }, []);
+
+  if (enabled === null) return null;
+
+  const toggle = async () => {
+    const next = !enabled;
+    setEnabled(next);
+    await setAutoDetailFetchOnArrival(next);
+  };
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-sm font-semibold text-brand-navy mb-1">새 협조문 도착 시 자동 요약</h3>
+      <label className="flex items-start gap-2.5 border border-brand-border rounded-lg p-3.5 cursor-pointer hover:bg-brand-alt">
+        <input type="checkbox" checked={enabled} onChange={toggle} className="mt-1 w-4 h-4" />
+        <div>
+          <p className="text-sm font-medium text-brand-navy">도착 즉시 상세 본문을 가져와 AI 요약 생성</p>
+          <p className="text-xs text-brand-muted mt-0.5">
+            켜면 새 협조문이 감지되자마자 상세 본문을 미리 가져와서 요약·마감기한을 채워둬요. 다만 상세 조회는
+            ERP에서 문서를 직접 열 때 쓰는 API와 같아서, <strong>ERP 협조문수신함의 "열람" 컬럼이 실제로 열어보지
+            않았는데도 Y로 바뀔 수 있어요</strong>. 꺼두면 협조문 탭에서 직접 문서를 열 때만 상세/요약을 가져와서
+            ERP 열람 상태와 실제로 확인한 시점이 일치해요.
+          </p>
+        </div>
+      </label>
+    </div>
+  );
+}
+
+function DeptCodesSection() {
+  const [deptCodes, setDeptCodesState] = useState([]);
+  const [discovered, setDiscovered] = useState([]);
+  const [newLabel, setNewLabel] = useState("");
+  const [newCode, setNewCode] = useState("");
+
+  useEffect(() => {
+    getDeptCodes().then(setDeptCodesState);
+    getMeta("discoveredDeptCodes").then((list) => setDiscovered(Array.isArray(list) ? list : []));
+  }, []);
+
+  const persist = async (list) => {
+    setDeptCodesState(list);
+    await setDeptCodes(list);
+  };
+
+  const addCode = async (label, code) => {
+    if (!code) return;
+    if (deptCodes.some((d) => d.code === code)) return;
+    await persist([...deptCodes, { label: label || code, code }]);
+  };
+
+  const removeCode = async (code) => {
+    await persist(deptCodes.filter((d) => d.code !== code));
+  };
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-sm font-semibold text-brand-navy mb-1">겸직 부서 코드</h3>
+      <p className="text-xs text-brand-muted mb-3">
+        소속 부서 자동조회에 안 잡히는 겸직 부서가 있으면 여기에 코드를 등록해두세요. 협조문 목록을 내 부서
+        범위로 걸러낼 때 이 목록도 함께 사용됩니다.
+      </p>
+
+      {discovered.length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs text-brand-muted mb-1.5">
+            최근 동기화에서 실제로 문서가 온 부서(자동 발견, 참고용 — 눌러서 바로 추가):
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {discovered
+              .filter((d) => !deptCodes.some((m) => m.code === d.code))
+              .map((d) => (
+                <button
+                  key={d.code}
+                  onClick={() => addCode(d.name, d.code)}
+                  className="text-xs px-2 py-1 rounded-full bg-brand-alt text-brand-blue border border-brand-border hover:bg-white"
+                >
+                  + {d.name} ({d.code})
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5 mb-3">
+        {deptCodes.length === 0 ? (
+          <p className="text-sm text-brand-muted">등록된 겸직 부서 코드가 없어요.</p>
+        ) : (
+          deptCodes.map((d) => (
+            <div
+              key={d.code}
+              className="flex items-center justify-between border border-brand-border rounded-lg px-3.5 py-2 text-sm"
+            >
+              <span className="text-brand-navy">
+                {d.label} <span className="text-brand-muted">({d.code})</span>
+              </span>
+              <button onClick={() => removeCode(d.code)} className="text-xs text-status-red underline">
+                삭제
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        <input
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          placeholder="부서명 (선택)"
+          className="border border-brand-border rounded-md px-2.5 py-1.5 text-sm flex-1 min-w-0"
+        />
+        <input
+          value={newCode}
+          onChange={(e) => setNewCode(e.target.value)}
+          placeholder="부서 코드"
+          className="border border-brand-border rounded-md px-2.5 py-1.5 text-sm w-32"
+        />
+        <button
+          onClick={() => {
+            addCode(newLabel, newCode.trim());
+            setNewLabel("");
+            setNewCode("");
+          }}
+          className="text-sm px-3 py-1.5 rounded-md bg-brand-blue text-white hover:bg-brand-blueDark flex-shrink-0"
+        >
+          추가
+        </button>
+      </div>
+
+      {/* 2026-09-02(2) 제거: "등록된 부서 코드만 화이트리스트로 사용" 토글이
+          있었는데, 실사용 중 "내 수신부서인데 안 불러와진다" 사고로 이어져서
+          뺐다. ERP 부서 드롭다운은 실제로 필터링을 안 하고(코드 상단 kisApi.js
+          주석 참고), 겸직/발령이 계속 바뀌는 계정 특성상 수동 목록만으로
+          완전한 화이트리스트를 유지하는 게 사실상 불가능해서 — 문서를 놓치는
+          쪽보다 범위 밖 문서가 조금 섞이는 쪽이 훨씬 안전하다는 이 앱의
+          원칙과 맞지 않는 기능이었다. 위 목록은 이제 항상 자동조회 결과에
+          "추가"되기만 하고, 절대로 자동조회 결과를 대체하지 않는다. */}
+    </div>
+  );
+}
+
+// 2026-09-02 추가: "세션 만료 알림이 자꾸 뜬다"는 리포트가 반복될 때마다
+// chrome://extensions에서 서비스워커 콘솔을 직접 열어 chrome.storage.local의
+// pollLog를 확인해야 했음(코드 주석에도 "재발 시 pollLog의 responseSnippet
+// 으로 추가 진단 필요"라고 남겨져 있었음) — 매번 그러기 번거로우니 설정
+// 탭에서 바로 최근 폴링 기록(성공/실패, 세션만료 추정 여부, ERP가 실제로
+// 준 응답 일부)을 볼 수 있게 노출한다. 이 페이지 자체가 확장 오리진
+// (chrome-extension://.../dist/index.html)이라 chrome.storage 접근 가능.
+function PollDiagnosticsSection() {
+  const [log, setLog] = useState(null);
+  const [streak, setStreak] = useState(0);
+
+  const refresh = () => {
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+    chrome.storage.local.get(["pollLog", "coopPollFailStreak"], (res) => {
+      setLog([...(res.pollLog || [])].slice(-15).reverse());
+      setStreak(res.coopPollFailStreak || 0);
+    });
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-sm font-semibold text-brand-navy">협조문 폴링 진단 로그</h3>
+        <button onClick={refresh} className="text-xs text-brand-blue hover:underline">
+          새로고침
+        </button>
+      </div>
+      <p className="text-xs text-brand-muted mb-3">
+        "ERP 로그인 세션 만료" 알림이 실제 로그아웃 때문인지, 아니면 오탐인지 확인할 때 참고하세요.
+        실패 항목의 응답 스니펫에 그 순간 ERP가 실제로 준 응답이 그대로 남아있어요.
+        {streak > 0 && <span className="text-red-500"> 현재 연속 실패 {streak}회 (2회부터 알림 발송).</span>}
+      </p>
+      {log === null ? (
+        <p className="text-xs text-brand-muted">불러오는 중...</p>
+      ) : log.length === 0 ? (
+        <p className="text-xs text-brand-muted">아직 기록된 폴링 로그가 없어요. (확장 설치/업데이트 직후일 수 있어요.)</p>
+      ) : (
+        <div className="border border-brand-border rounded-lg divide-y divide-brand-border max-h-80 overflow-y-auto">
+          {log.map((entry, i) => (
+            <div key={i} className="px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={entry.ok ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>
+                  {entry.ok ? "성공" : "실패"}
+                </span>
+                <span className="text-brand-muted">{new Date(entry.ts).toLocaleString("ko-KR")}</span>
+                {entry.sessionExpired && (
+                  <span className="text-red-500 bg-red-50 rounded px-1.5 py-0.5">세션만료 추정</span>
+                )}
+                {entry.ok && <span className="text-brand-muted">{entry.count}건</span>}
+              </div>
+              {entry.error && <p className="text-brand-muted mt-1 break-words">{entry.error}</p>}
+              {entry.responseSnippet && (
+                <pre className="mt-1 bg-brand-alt rounded px-2 py-1.5 whitespace-pre-wrap break-all text-[11px] text-brand-muted">
+                  {entry.responseSnippet}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  const summarySettings = useStore((s) => s.summarySettings);
+  const setSummarySettings = useStore((s) => s.setSummarySettings);
+
+  return (
+    <div className="p-4 max-w-2xl mx-auto">
+      <h2 className="text-lg font-semibold text-brand-navy mb-1">설정</h2>
+      <p className="text-sm text-brand-muted mb-6">협조문 카드에서 AI요약을 어떻게 보여줄지 정해요.</p>
+
+      <div className="flex flex-col gap-3">
+        <label className="flex items-start gap-2.5 border border-brand-border rounded-lg p-3.5 cursor-pointer hover:bg-brand-alt">
+          <input
+            type="radio"
+            name="summary-mode"
+            checked={summarySettings.mode === "always"}
+            onChange={() => setSummarySettings({ mode: "always" })}
+            className="mt-1"
+          />
+          <div>
+            <p className="text-sm font-medium text-brand-navy">전부 펼쳐보기</p>
+            <p className="text-xs text-brand-muted mt-0.5">지금처럼 모든 협조문의 AI요약을 항상 펼쳐서 보여줘요.</p>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 border border-brand-border rounded-lg p-3.5 cursor-pointer hover:bg-brand-alt">
+          <input
+            type="radio"
+            name="summary-mode"
+            checked={summarySettings.mode === "recent"}
+            onChange={() => setSummarySettings({ mode: "recent" })}
+            className="mt-1"
+          />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-brand-navy">최근 협조문만 펼쳐보기</p>
+            <p className="text-xs text-brand-muted mt-0.5">
+              최근{" "}
+              <select
+                value={summarySettings.recentWeeks}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setSummarySettings({ mode: "recent", recentWeeks: Number(e.target.value) })}
+                className="border border-brand-border rounded px-1.5 py-0.5 text-xs bg-white"
+              >
+                {WEEK_OPTIONS.map((w) => (
+                  <option key={w} value={w}>
+                    {w}주
+                  </option>
+                ))}
+              </select>{" "}
+              이내 협조문만 펼치고, 나머지는 접어서 보여줘요.
+            </p>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 border border-brand-border rounded-lg p-3.5 cursor-pointer hover:bg-brand-alt">
+          <input
+            type="radio"
+            name="summary-mode"
+            checked={summarySettings.mode === "unread"}
+            onChange={() => setSummarySettings({ mode: "unread" })}
+            className="mt-1"
+          />
+          <div>
+            <p className="text-sm font-medium text-brand-navy">읽은 협조문은 접기</p>
+            <p className="text-xs text-brand-muted mt-0.5">
+              한 번이라도 열어본 협조문은 AI요약을 접어서 보여줘요. (카드에서 직접 "펼치기"로 다시 볼 수 있어요.)
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <AutoDetailFetchSection />
+      <FeatureTogglesSection />
+      <DeptCodesSection />
+      <PollDiagnosticsSection />
+    </div>
+  );
+}
