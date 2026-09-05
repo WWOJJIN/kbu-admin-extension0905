@@ -296,6 +296,16 @@ async function getCoopDoc(id) {
   const db = await initDB();
   return db.get(STORE_COOP_DOCS, id);
 }
+async function getAllCoopDocs() {
+  const db = await initDB();
+  const all = await db.getAll(STORE_COOP_DOCS);
+  return all.sort((a, b) => {
+    const dateA = a.date || "";
+    const dateB = b.date || "";
+    if (dateA !== dateB) return dateB.localeCompare(dateA);
+    return (b.id || "").localeCompare(a.id || "");
+  });
+}
 async function getAllCoopDocIds() {
   const db = await initDB();
   const keys = await db.getAllKeys(STORE_COOP_DOCS);
@@ -1029,10 +1039,40 @@ chrome.runtime.onInstalled.addListener(() => {
   pollCoopDocs();
   pollApprovalStatus();
   pollStatusChanges();
+  migrateStaleAiSummariesOnce();
 });
 chrome.runtime.onStartup.addListener(() => {
   setupAlarm();
+  migrateStaleAiSummariesOnce();
 });
+var AI_SUMMARY_MIGRATION_KEY = "ai_summary_migration_20260905_promptHashFix_done";
+async function migrateStaleAiSummariesOnce() {
+  try {
+    const done = await getMeta(AI_SUMMARY_MIGRATION_KEY);
+    if (done) return;
+    const docs = await getAllCoopDocs();
+    const targets = docs.filter((d) => d.raw_text && d.raw_text.trim() && !d.body_unavailable);
+    console.log(`[migration] AI \uC694\uC57D \uC7AC\uC0DD\uC131 \uC2DC\uC791 (\uD504\uB86C\uD504\uD2B8 \uC218\uC815 \uBC18\uC601): \uB300\uC0C1 ${targets.length}\uAC74`);
+    for (const doc of targets) {
+      try {
+        const parsed = await parseCoopDoc(doc.raw_text, doc.id);
+        await upsertCoopDoc({
+          ...doc,
+          ai_summary: parsed.summary || doc.ai_summary,
+          deadline: parsed.deadline ?? doc.deadline,
+          requires_action: typeof parsed.requires_action === "boolean" ? parsed.requires_action : doc.requires_action,
+          action_description: parsed.action_description ?? doc.action_description
+        });
+      } catch (err) {
+        console.warn(`[migration] \uBB38\uC11C \uC7AC\uD30C\uC2F1 \uC2E4\uD328 (id=${doc.id}):`, err);
+      }
+    }
+    await setMeta(AI_SUMMARY_MIGRATION_KEY, true);
+    console.log("[migration] AI \uC694\uC57D \uC7AC\uC0DD\uC131 \uC644\uB8CC");
+  } catch (err) {
+    console.warn("[migration] \uB9C8\uC774\uADF8\uB808\uC774\uC158 \uC790\uCCB4 \uC2E4\uD328:", err);
+  }
+}
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM_NAME) {
     pollCoopDocs();
