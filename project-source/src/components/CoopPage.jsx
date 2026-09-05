@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import useStore from "../store/useStore.js";
-import CoopTimelineItem from "./CoopTimelineItem.jsx";
+import CoopCard from "./CoopCard.jsx";
 // CoopDetailModal은 App.jsx로 옮김 — 브리핑 탭 등 다른 탭에서 문서를 열어도
 // 탭 이동 없이 그 자리에서 팝업이 뜨도록 selectedDocId 기준으로 항상 마운트됨
 // (2026-08-23(2)).
@@ -204,16 +204,12 @@ export default function CoopPage() {
             : "이 부서에 해당하는 협조문이 없습니다."}
         </p>
       ) : (
-        // 2026-09-05: "타임라인형으로 가보자" 요청 — 그리드 카드 대신 접수일
-        // 순서를 세로선으로 이어서 보여주는 CoopTimelineItem으로 교체
-        // (preview_layout_styles.html ④안 채택). max-w로 폭을 좁혀서 타임라인
-        // 한 줄이 너무 길게 늘어나지 않게 함. isLast만 넘겨서 마지막 항목
-        // 아래로는 연결선이 허공에 뜨지 않게 함.
-        // 2026-09-05: "카드 너비를 더 길게 해줘봐" 요청 — 제목이 좁은 폭 때문에
-        // 두 줄로 어색하게 꺾이는 문제 해결 위해 max-w-2xl(672px) → max-w-4xl(896px)로 확장.
-        <div className="max-w-4xl mx-auto">
-          {pageDocs.map((doc, idx) => (
-            <CoopTimelineItem
+        // 2026-09-05: 타임라인형을 한 번 적용했다가, "타임라인 없이 지금 카드
+        // 모양 유지해서 2열로 해줄 수 있어?" 요청으로 다시 카드 그리드로 원복.
+        // 이전 그리드는 lg 이상에서 3열이었는데, 이번엔 2열로 고정.
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+          {pageDocs.map((doc) => (
+            <CoopCard
               key={doc.id}
               doc={doc}
               onClick={() => openDetail(doc.id)}
@@ -221,7 +217,6 @@ export default function CoopPage() {
               // 닫아버려" 요청 — 카드 개별 토글 없이, 지금 보고 있는 탭
               // (newFilter)에 따라 AI요약 펼침 여부를 일괄로 정함.
               expanded={newFilter === "new"}
-              isLast={idx === pageDocs.length - 1}
             />
           ))}
         </div>

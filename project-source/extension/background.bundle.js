@@ -981,16 +981,19 @@ async function callProxyWithRetry(rawText, aprvNo, retries) {
     throw err;
   }
 }
-var SUMMARY_MAX_CHARS = 70;
-var ACTION_DESC_MAX_CHARS = 35;
+var SUMMARY_MAX_CHARS = 120;
+var ACTION_DESC_MAX_CHARS = 60;
 function enforceShortText(text, maxChars) {
   if (!text) return "";
   const firstSentence = text.split(/(?<=[.!?다요함음])\s+/)[0] || text;
   const trimmed = firstSentence.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, maxChars)}\u2026`;
+  const hardCut = trimmed.slice(0, maxChars);
+  const lastSpace = hardCut.lastIndexOf(" ");
+  const safeCut = lastSpace > maxChars * 0.6 ? hardCut.slice(0, lastSpace) : hardCut;
+  return `${safeCut}\u2026`;
 }
-var PROMPT_VERSION = 4;
+var PROMPT_VERSION = 5;
 function normalizeParsedDoc(data) {
   return {
     title: data?.title ?? "",
