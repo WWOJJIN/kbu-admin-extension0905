@@ -11,7 +11,7 @@
 // 반드시 동일한 값으로 이미 채워둠(2026-09-05 생성) — 값을 바꾸려면 세 군데
 // (여기, proxy/.dev.vars, Cloudflare 대시보드 시크릿)를 같이 바꿔야 함.
 
-const PROXY_URL = ""; // TODO: Cloudflare Worker 배포 후 실제 URL로 채울 것 (proxy/README.md 참고)
+const PROXY_URL = "https://kbu-admin-proxy.20250147.workers.dev"; // 2026-09-05 배포 완료(Cloudflare 대시보드)
 const PROXY_SECRET_HEADER = "x-proxy-secret";
 const PROXY_SECRET = "b7f00dd4f162baf019d3cae3969d4ee7e85f10f05c13f4a607545d671857e9bc";
 

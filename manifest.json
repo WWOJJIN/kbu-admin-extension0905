@@ -3,16 +3,30 @@
   "name": "대학 행정 어시스턴트",
   "version": "0.1.0",
   "description": "ERP 협조문 자동 수신·AI 파싱·캘린더 통합·인수인계 챗봇 제공하는 대학 행정직원용 확장프로그램.",
-  "permissions": ["alarms", "notifications", "storage", "tabs", "identity"],
-  "host_permissions": ["https://kis.kbu.ac.kr/*", "https://www.googleapis.com/*"],
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage",
+    "tabs",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://kis.kbu.ac.kr/*",
+    "https://www.googleapis.com/*",
+    "https://kbu-admin-proxy.20250147.workers.dev/*"
+  ],
   "background": {
     "service_worker": "background.bundle.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://kis.kbu.ac.kr/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://kis.kbu.ac.kr/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -31,6 +45,8 @@
   },
   "oauth2": {
     "client_id": "149483961748-b79crc3mej62hgtqt3o9kc93f114g2eu.apps.googleusercontent.com",
-    "scopes": ["https://www.googleapis.com/auth/calendar.events"]
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events"
+    ]
   }
 }
