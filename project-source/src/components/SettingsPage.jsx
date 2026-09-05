@@ -3,7 +3,7 @@
 // 3가지 정책 중 고르게 함(useStore.js summarySettings). CoopCard.jsx가 이
 // 값을 읽어서 카드별 펼침/접힘을 결정함.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import useStore from "../store/useStore.js";
 import {
   getFeatureToggles,
@@ -93,23 +93,6 @@ function AiSummaryToggleSection() {
   const getMissingAiSummaryCandidates = useStore((s) => s.getMissingAiSummaryCandidates);
   const bulkResummarizeMissingAi = useStore((s) => s.bulkResummarizeMissingAi);
   const resummarizeProgress = useStore((s) => s.resummarizeProgress);
-  // 2026-09-05(8) 추가: "재요약 초기화(테스트용)" 버튼 — coopDocs를 구독해서
-  // bulkAgeDays 기준으로 "이미 AI 요약이 있는" 문서 수를 미리보기로 계산.
-  // (useStore.js의 resetAiSummaryForAge 안 필터와 동일한 로직을 화면 표시용으로
-  // 한 번 더 계산 — 액션 자체는 count만 리턴하지 않고 실행까지 하므로 분리.)
-  const coopDocs = useStore((s) => s.coopDocs);
-  const resetAiSummaryForAge = useStore((s) => s.resetAiSummaryForAge);
-  const resettableCount = useMemo(() => {
-    const now = Date.now();
-    return coopDocs.filter((d) => {
-      if (!d.ai_summary) return false;
-      if (!bulkAgeDays || bulkAgeDays <= 0) return true;
-      if (!d.date) return true;
-      const docTime = new Date(`${d.date}T00:00:00`).getTime();
-      if (Number.isNaN(docTime)) return true;
-      return now - docTime <= bulkAgeDays * 24 * 60 * 60 * 1000;
-    }).length;
-  }, [coopDocs, bulkAgeDays]);
 
   useEffect(() => {
     getAiSummaryEnabled().then(setEnabled);
@@ -143,20 +126,6 @@ function AiSummaryToggleSection() {
     );
     if (!ok) return;
     await bulkResummarizeMissingAi({ ageDaysOverride: bulkAgeDays });
-    getMissingAiSummaryCandidates({ ageDaysOverride: bulkAgeDays }).then((docs) => setMissingCount(docs.length));
-  };
-
-  // 2026-09-05(8) 추가: 개발/테스트 전용 — 방금 재요약된 내용을 지워서
-  // "일괄 재요약" 버튼을 반복 테스트할 수 있게 함. Claude API를 안 부르는
-  // 로컬 작업이라 비용 경고는 없지만, 되돌릴 수 없어서 confirm은 그대로 둠.
-  const handleResetAiSummary = async () => {
-    if (!resettableCount) return;
-    const ok = window.confirm(
-      `최근 ${bulkAgeDays === 0 ? "전체 기간" : `${bulkAgeDays}일`} 문서 중 AI 요약이 있는 ${resettableCount}건을 초기화(삭제)할까요?\n` +
-        `개발/테스트용 기능이에요. Claude API를 호출하지 않아 비용은 안 들지만, 초기화하면 되돌릴 수 없어요.`
-    );
-    if (!ok) return;
-    await resetAiSummaryForAge({ ageDaysOverride: bulkAgeDays });
     getMissingAiSummaryCandidates({ ageDaysOverride: bulkAgeDays }).then((docs) => setMissingCount(docs.length));
   };
 
@@ -249,38 +218,6 @@ function AiSummaryToggleSection() {
             {resummarizeProgress.failed > 0 ? ` (실패 ${resummarizeProgress.failed}건)` : ""}
           </p>
         )}
-      </div>
-
-      {/* 2026-09-05(8) 추가: "일괄 재요약 해서 재요약된 내용을 삭제할 수
-          있는 기능도 넣어주라, 개발 단계에서 테스트하고 싶은게 있어서" 요청.
-          위 "기존 문서 일괄 재요약"과 같은 기간 선택(bulkAgeDays)을 그대로
-          재사용해서, 그 범위 안에서 이미 AI 요약이 채워진 문서만 골라 다시
-          "재요약 전" 상태로 되돌린다 — 재요약 로직을 실제로 며칠씩 기다리지
-          않고 반복 테스트하기 위한 개발자용 도구. Claude API를 호출하지
-          않는 순수 로컬 작업이라 비용은 안 들지만, 초기화하면 되돌릴 수
-          없어서 다른 박스와 구분되게 amber(경고) 톤으로 표시. */}
-      <div className={`mt-2 border border-amber-200 bg-amber-50 rounded-lg px-3.5 py-2.5 ${enabled ? "" : "opacity-50"}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="pr-3">
-            <p className="text-sm text-amber-900">
-              재요약 초기화 <span className="font-normal text-amber-700">(개발/테스트용)</span>
-            </p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              위에서 고른 기간 기준으로, 이미 AI 요약이 있는 문서의 요약만 지워서 재요약 전 상태로 되돌려요.
-              Claude API 호출 없이 로컬에서만 지워져서 비용은 안 들지만, 초기화하면 되돌릴 수 없어요.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 mt-2.5">
-          <button
-            type="button"
-            onClick={handleResetAiSummary}
-            disabled={!enabled || !resettableCount || !!resummarizeProgress}
-            className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-md bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            최근 {bulkAgeDays === 0 ? "전체 기간" : `${bulkAgeDays}일`} · {resettableCount ?? "-"}건 초기화
-          </button>
-        </div>
       </div>
     </div>
   );

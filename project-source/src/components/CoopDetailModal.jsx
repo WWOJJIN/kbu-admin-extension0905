@@ -110,19 +110,6 @@ function FormattedBody({ text }) {
   ));
 }
 
-// 2026-09-05(7) 추가: CoopCard.jsx와 동일한 이유/규칙으로 상세 팝업의 AI
-// 요약도 문장이 여러 개면 "- "로 시작하는 줄 목록으로 나눠서 보여줌(가독성
-// 개선 요청). 문장이 1개면 원래대로 문단 그대로.
-function formatSummaryForReadability(text) {
-  if (!text) return text;
-  const sentences = text
-    .split(/(?<=[.!?다요함음])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (sentences.length <= 1) return text;
-  return sentences.map((s) => `- ${s}`).join("\n");
-}
-
 export default function CoopDetailModal({ docId }) {
   const closeDetail = useStore((s) => s.closeDetail);
   const completeDoc = useStore((s) => s.completeDoc);
@@ -196,11 +183,9 @@ export default function CoopDetailModal({ docId }) {
                 </span>
               )}
             </div>
-            {/* 2026-09-05(6): 카드(CoopCard.jsx)와 동일하게 "요약이 밑으로,
-                기한/조치가 위로" 순서로 맞춤 — 팝업을 열자마자 언제까지 뭘
-                해야 하는지부터 보이게 함. 구분선은 메타 블록 밑으로 이동. */}
+            <p className="whitespace-pre-line">{doc.ai_summary}</p>
             {(doc.deadline || doc.action_description) && (
-              <div className="pb-2 mb-2 border-b border-blue-100 flex flex-col gap-0.5 text-[13px]">
+              <div className="mt-2 pt-2 border-t border-blue-100 flex flex-col gap-0.5 text-[13px]">
                 {doc.deadline && (
                   <p>
                     <span className="font-semibold">기한</span> {doc.deadline}
@@ -213,7 +198,6 @@ export default function CoopDetailModal({ docId }) {
                 )}
               </div>
             )}
-            <p className="whitespace-pre-line">{formatSummaryForReadability(doc.ai_summary)}</p>
           </div>
         )}
 

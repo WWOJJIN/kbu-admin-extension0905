@@ -110,25 +110,14 @@ async function callProxyWithRetry(rawText, aprvNo, retries) {
 // 안전장치. 첫 문장만 남기고, 그래도 길면 글자수로 강제 컷.
 // 2026-09-05(4): 목표 길이를 40~60자로 재조정하면서 강제컷 한도도 같이 늘림
 // (40자는 너무 타이트해서 문장이 아니라 명사구로만 끝나버리는 원인이었음).
-// 2026-09-05(5): "요약이 짤려서 나온다" 리포트 — 목표(40~60자)보다 모델이
-// 조금 길게(70~90자) 써서 붙는 경우가 실제로 잦았는데, 70자 하드컷이 그
-// 경우 문장 끝(다/요 등)에 닿기도 전에 단어 중간에서 잘라버려("...안내입니…"
-// 처럼) 부자연스러웠음. 문장 끝을 못 찾은 채 하드컷하는 것 자체를 지양하고,
-// 컷 한도를 120자로 늘려 "조금 긴 정상 문장"은 안 잘리게 함(진짜 폭주하는
-// 경우에 대한 안전장치 성격은 유지).
-const SUMMARY_MAX_CHARS = 120;
-const ACTION_DESC_MAX_CHARS = 60;
+const SUMMARY_MAX_CHARS = 70;
+const ACTION_DESC_MAX_CHARS = 35;
 function enforceShortText(text, maxChars) {
   if (!text) return "";
   const firstSentence = text.split(/(?<=[.!?다요함음])\s+/)[0] || text;
   const trimmed = firstSentence.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  // 문장 중간을 단어 경계 없이 자르면 "안내입니…"처럼 부자연스러우니,
-  // 컷 지점 근처의 마지막 공백에서 끊어서 최소한 어절 단위로는 잘리게 함.
-  const hardCut = trimmed.slice(0, maxChars);
-  const lastSpace = hardCut.lastIndexOf(" ");
-  const safeCut = lastSpace > maxChars * 0.6 ? hardCut.slice(0, lastSpace) : hardCut;
-  return `${safeCut}…`;
+  return `${trimmed.slice(0, maxChars)}…`;
 }
 
 // 2026-09-05(4) 추가: 프롬프트/스키마를 바꿀 때마다 값을 올린다. 이미 저장된
@@ -136,9 +125,8 @@ function enforceShortText(text, maxChars) {
 // 다시 잡힌다(useStore.js getMissingAiSummaryCandidates 참고) — ai_summary가
 // 이미 있어도(예전 버전으로 채워진 것) 새 프롬프트로 다시 돌릴 수 있게 하려는
 // 목적. 버전 이력: 1=스키마 필드명 없음(항상 빈 요약), 2=필드명은 있지만 길이
-// 제약 없음(산문형, 너무 김), 3=25자 명사구 강제(너무 짧음), 4=40~60자 한 문장,
-// 5=하드컷 한도 120자로 완화 + 어절 경계 컷(문장 중간 부자연스러운 절단 방지).
-export const PROMPT_VERSION = 5;
+// 제약 없음(산문형, 너무 김), 3=25자 명사구 강제(너무 짧음), 4=40~60자 한 문장.
+export const PROMPT_VERSION = 4;
 
 function normalizeParsedDoc(data) {
   return {

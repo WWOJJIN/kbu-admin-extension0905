@@ -390,60 +390,6 @@ const useStore = create((set, get) => ({
     set({ resummarizeProgress: null });
     await get().loadCoopDocs();
   },
-
-  /**
-   * 2026-09-05(8) 추가 — 개발/테스트 전용. "지금 일괄 재요약해서 재요약된
-   * 내용을 삭제할 수 있는 기능도 넣어주라" 요청: 재요약 로직을 개발 중
-   * 반복 테스트하려면 매번 며칠을 기다리거나 IndexedDB를 수동으로 지워야
-   * 하는데, 그 수고를 없애기 위해 "기존 문서 일괄 재요약" 버튼 옆의 동일한
-   * 기간 선택(1/3/7/14/30일/전체)을 그대로 재사용해서, 선택한 기간 범위
-   * 문서들의 AI 요약 결과만 지워 "재요약 전" 상태로 되돌린다.
-   * ai_summary/ai_summary_prompt_version/action_type/action_description을
-   * 비우고, deadline/requires_action은 AI가 없을 때 쓰는 규칙 기반 폴백
-   * (fillParsedFallback)으로 다시 계산해서 최초 저장 직후 상태와 최대한
-   * 비슷하게 맞춘다. bulkResummarizeMissingAi와 달리 Claude API를 호출하지
-   * 않는 순수 로컬 작업이라 비용은 안 든다 — 그래서 날짜 모르는 문서를
-   * 안전하게 "제외"할 이유가 없어 includeUnknownDate 개념 없이 그냥 포함한다.
-   * @param {{ ageDaysOverride?: number }} [options]
-   * @returns {Promise<number>} 초기화된 문서 수
-   */
-  resetAiSummaryForAge: async (options = {}) => {
-    const { ageDaysOverride } = options;
-    const docs = get().coopDocs.length ? get().coopDocs : await getAllCoopDocs();
-    const now = Date.now();
-    const targets = docs.filter((d) => {
-      if (!d.ai_summary) return false; // 이미 비어있으면 초기화할 것도 없음
-      if (!ageDaysOverride || ageDaysOverride <= 0) return true; // 전체 기간
-      if (!d.date) return true; // 비용 없는 로컬 작업이라 날짜 모르는 문서도 그냥 포함
-      const docTime = new Date(`${d.date}T00:00:00`).getTime();
-      if (Number.isNaN(docTime)) return true;
-      return now - docTime <= ageDaysOverride * 24 * 60 * 60 * 1000;
-    });
-
-    if (targets.length === 0) {
-      get().showToast("초기화할 요약이 없어요.");
-      return 0;
-    }
-
-    for (const doc of targets) {
-      const fallback = fillParsedFallback(null, doc.raw_text || "");
-      await upsertCoopDoc({
-        ...doc,
-        ai_summary: "",
-        ai_summary_prompt_version: 0,
-        action_type: null,
-        action_description: null,
-        deadline: fallback.deadline,
-        requires_action: fallback.requires_action,
-        deadline_is_fallback: true,
-        requires_action_is_fallback: true,
-      });
-    }
-
-    await get().loadCoopDocs();
-    get().showToast(`${targets.length}건의 AI 요약을 초기화했어요.`);
-    return targets.length;
-  },
   backfillMissingDrafters: async () => {
     const docs = get().coopDocs.length ? get().coopDocs : await getAllCoopDocs();
     const missing = docs.filter(

@@ -1,4 +1,4 @@
-// node_modules/idb/build/index.js
+// node_modules/.pnpm/idb@8.0.3/node_modules/idb/build/index.js
 var instanceOfAny = (object, constructors) => constructors.some((c) => object instanceof c);
 var idbProxyableTypes;
 var cursorAdvanceMethods;
@@ -353,10 +353,6 @@ async function getSyncBaselineDone(key) {
 }
 async function setSyncBaselineDone(key) {
   return setMeta(`${SYNC_BASELINE_PREFIX}${key}`, true);
-}
-async function getDeptCodes() {
-  const list = await getMeta("deptCodes");
-  return Array.isArray(list) ? list : [];
 }
 var DEFAULT_FEATURE_TOGGLES = {
   briefing: true,
@@ -836,13 +832,6 @@ function fetchCoopDocList({ stGbn = "03", docDeptCd = "" } = {}) {
     "DS_BSNS052"
   );
 }
-async function fetchPersOfrdDeptList() {
-  const rows = await postDataset(ENDPOINTS.persOfrdDeptList, "DS_COND", {}, void 0, "DS_DEPT");
-  return rows.filter((r) => r.deptCd).map((r) => ({
-    code: r.deptCd,
-    name: (r.deptNm || r.deptCd).replace(/\s*\(\d+\)\s*$/, "")
-  }));
-}
 async function fetchCoopDocListAllDepts() {
   const items = await fetchCoopDocList({ docDeptCd: "" });
   recordDiscoveredDeptCodes(items).catch(
@@ -862,30 +851,8 @@ async function recordDiscoveredDeptCodes(items) {
   const list = Array.from(merged, ([code, name]) => ({ code, name }));
   await setMeta("discoveredDeptCodes", list);
 }
-var cachedMyDeptCodes = null;
 async function fetchMyCoopDocList() {
-  const listItems = await fetchCoopDocListAllDepts();
-  if (!cachedMyDeptCodes) {
-    try {
-      const depts = await fetchPersOfrdDeptList();
-      cachedMyDeptCodes = new Set(depts.map((d) => d.code).filter(Boolean));
-    } catch (err) {
-      console.warn(
-        "[kisApi] \uC18C\uC18D \uBD80\uC11C \uBAA9\uB85D(fetchPersOfrdDeptList) \uC870\uD68C \uC2E4\uD328 \u2014 \uC774\uBC88 \uD3F4\uB9C1\uC740 \uD544\uD130\uB9C1 \uC5C6\uC774 \uC804\uCCB4 \uBC18\uD658:",
-        err
-      );
-      return listItems;
-    }
-  }
-  let manualCodes = [];
-  try {
-    manualCodes = (await getDeptCodes()).map((d) => d.code).filter(Boolean);
-  } catch (err) {
-    console.warn("[kisApi] \uC218\uB3D9 \uBD80\uC11C \uCF54\uB4DC \uC870\uD68C \uC2E4\uD328(\uBB34\uC2DC\uD558\uACE0 \uC790\uB3D9\uBC1C\uACAC \uBAA9\uB85D\uB9CC \uC0AC\uC6A9):", err);
-  }
-  const allowedCodes = /* @__PURE__ */ new Set([...cachedMyDeptCodes, ...manualCodes]);
-  if (allowedCodes.size === 0) return listItems;
-  return listItems.filter((item) => item.rcvDeptCd && allowedCodes.has(item.rcvDeptCd));
+  return fetchCoopDocListAllDepts();
 }
 function fetchExpenseTravelList() {
   return postDataset(ENDPOINTS.expenseTravelList, "DS_COND", {});
@@ -981,19 +948,16 @@ async function callProxyWithRetry(rawText, aprvNo, retries) {
     throw err;
   }
 }
-var SUMMARY_MAX_CHARS = 120;
-var ACTION_DESC_MAX_CHARS = 60;
+var SUMMARY_MAX_CHARS = 70;
+var ACTION_DESC_MAX_CHARS = 35;
 function enforceShortText(text, maxChars) {
   if (!text) return "";
   const firstSentence = text.split(/(?<=[.!?다요함음])\s+/)[0] || text;
   const trimmed = firstSentence.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  const hardCut = trimmed.slice(0, maxChars);
-  const lastSpace = hardCut.lastIndexOf(" ");
-  const safeCut = lastSpace > maxChars * 0.6 ? hardCut.slice(0, lastSpace) : hardCut;
-  return `${safeCut}\u2026`;
+  return `${trimmed.slice(0, maxChars)}\u2026`;
 }
-var PROMPT_VERSION = 5;
+var PROMPT_VERSION = 4;
 function normalizeParsedDoc(data) {
   return {
     title: data?.title ?? "",
