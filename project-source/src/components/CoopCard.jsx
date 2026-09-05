@@ -24,11 +24,15 @@
 // 안 씀(항상 true) — Settings 탭의 해당 옵션은 남아있지만 이 카드엔 더 이상
 // 영향을 안 준다.
 // 2026-08-23(16): 바로 위 결정을 뒤집는 후속 요청 — "신규탭에서는 펼쳐지게
-// 하고 전체에서는 다 닫아버려". 즉 사용자가 카드마다 직접 누르는 토글이
-// 아니라, "지금 어느 탭인지"에 따라 전부 한꺼번에 펼침/접힘이 정해져야 함.
-// 이 판단(신규 vs 전체)은 CoopPage.jsx가 갖고 있는 newFilter 상태라 여기선
-// 알 수 없으므로, CoopPage.jsx가 그 값을 그대로 expanded prop으로 내려주고
-// 이 컴포넌트는 그 prop만 그대로 따른다(카드 자체 토글 로직은 다시 안 넣음).
+// 하고 전체에서는 다 닫아버려". 이 판단(신규 vs 전체)은 CoopPage.jsx가 갖고
+// 있는 newFilter 상태라 여기선 알 수 없으므로, CoopPage.jsx가 그 값을 그대로
+// expanded prop으로 내려주고 이 컴포넌트는 그 prop만 그대로 따랐었음.
+// 2026-09-05(8): "신규20이랑 전체랑 합쳐서 전체로 만들어줘" 요청으로 신규/
+// 전체 탭 자체가 없어지면서 위 방식의 전제(newFilter)가 사라짐 — 탭 기반
+// 강제 규칙을 걷어내고, 원래 설계였던 summarySettings(always/recent/unread)
+// 기준 getDefaultExpanded를 다시 살림. CoopPage.jsx는 더 이상 expanded prop을
+// 내려주지 않고, 이 컴포넌트가 store의 summarySettings를 직접 읽어서 문서별로
+// 펼침 여부를 정한다.
 // 2026-08-23(2): Stitch로 뽑아본 카드 시안 중 마음에 든 요소(발신부서 앞
 // 아이콘, 수신범위 표시)를 반영한 하이브리드 리디자인. 다만 "AI Summary"
 // 라벨을 명시적으로 보여주는 건 계속 유지 — 이게 이 앱의 핵심 차별점(이건
@@ -38,6 +42,7 @@
 // 추가 안 하려고 순수 텍스트 이니셜로 구현.
 
 import { mockSummarize } from "../lib/kisApi.js";
+import useStore from "../store/useStore.js";
 
 // 2026-09-02: CoopPage.jsx와 동일한 기준(이번 달=달력 기준 1일~말일)으로
 // "신규"를 판단하도록 통일. 예전엔 "최근 30일" rolling window + is_new를
@@ -135,6 +140,26 @@ function StatusBadge({ doc }) {
   return null;
 }
 
+// 2026-09-05(8) 추가: useStore.js 상단 주석(loadSummarySettings 근처)에 적힌
+// 원래 스펙 그대로 복원 —
+//   "always" : 항상 펼침
+//   "recent" : doc.date 기준 최근 N주(recentWeeks) 이내만 펼치고 나머지는 접음
+//   "unread" : 한 번이라도 열어본(doc.is_new === false) 문서는 접음
+// 날짜/읽음 정보가 없어서 판단 불가능한 경우는 안전하게 "펼침" 쪽으로 둔다.
+function getDefaultExpanded(doc, summarySettings) {
+  const mode = summarySettings?.mode || "always";
+  if (mode === "unread") return doc.is_new !== false;
+  if (mode === "recent") {
+    if (!doc.date) return true;
+    const target = new Date(`${doc.date}T00:00:00`).getTime();
+    if (Number.isNaN(target)) return true;
+    const weeks = summarySettings.recentWeeks || 2;
+    const ms = weeks * 7 * 24 * 60 * 60 * 1000;
+    return Date.now() - target <= ms;
+  }
+  return true;
+}
+
 // 2026-09-05(7) 추가: "3문장으로 길게 나오는 건 하이픈 사용 등 해서
 // 가독성있게 해줘" 요청 — claudeApi.js의 enforceShortText가 새로 파싱되는
 // 문서는 한 문장으로 잘라주지만, 그 로직이 생기기 전(프롬프트 버전 낮음)에
@@ -152,7 +177,12 @@ function formatSummaryForReadability(text) {
   return sentences.map((s) => `- ${s}`).join("\n");
 }
 
-export default function CoopCard({ doc, onClick, expanded = true }) {
+export default function CoopCard({ doc, onClick }) {
+  // 2026-09-05(8): expanded를 더 이상 부모(CoopPage.jsx)가 내려주지 않음 —
+  // 설정 탭에서 고른 summarySettings를 이 카드가 직접 구독해서 문서별로
+  // 펼침 여부를 계산한다.
+  const summarySettings = useStore((s) => s.summarySettings);
+  const expanded = getDefaultExpanded(doc, summarySettings);
   // 2026-09-05 수정: ai_summary가 비어서 mockSummarize(본문 앞부분을 그냥 잘라낸
   // 발췌, AI 아님)로 대체되는 경우에도 라벨이 계속 "AI Summary"로 고정 표시돼서
   // 실사용 중 "이거 그냥 본문 복붙 아니냐"는 혼란이 있었음 — isRealAiSummary로
