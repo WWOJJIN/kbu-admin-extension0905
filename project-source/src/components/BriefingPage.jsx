@@ -7,6 +7,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useStore from "../store/useStore.js";
+// 2026-09-07: "최근 한 달치만 불러오도록" 요청 — 아래 RECENT_DOC_DAYS(30, "새
+// 문서" 배지 판정용 상수)와는 목적이 달라서 이름 충돌 없게 별칭으로 가져옴.
+import { isWithinRecentDays, RECENT_DOCS_DAYS as LOAD_RECENT_DAYS } from "../lib/textUtils.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEADLINE_HORIZON_DAYS = 14; // "이번주 마감" 패널 — 사용자 요청으로 넉넉히 2주 범위까지 보여줌
@@ -113,11 +116,19 @@ function Panel({ title, count, panelRef, highlighted, children }) {
 }
 
 export default function BriefingPage() {
-  const coopDocs = useStore((s) => s.coopDocs);
+  const allCoopDocs = useStore((s) => s.coopDocs);
   const loadCoopDocs = useStore((s) => s.loadCoopDocs);
   const openDetail = useStore((s) => s.openDetail);
   const completeDoc = useStore((s) => s.completeDoc);
   const setActiveTab = useStore((s) => s.setActiveTab);
+
+  // 2026-09-07: "최근 한 달치만 불러오도록" — 브리핑 탭도 기안일(date) 기준
+  // 최근 30일 문서만 대상으로 통계/패널을 구성한다. store.coopDocs 자체는
+  // 그대로 두고(useStore.js 참고) 표시 직전에만 한 번 더 거른다.
+  const coopDocs = useMemo(
+    () => allCoopDocs.filter((d) => isWithinRecentDays(d.date, LOAD_RECENT_DAYS)),
+    [allCoopDocs]
+  );
 
   const [usingSample, setUsingSample] = useState(false); // 레이아웃 확인용 샘플 데이터 토글
   const sampleDocs = useMemo(() => buildSampleDocs(), []);

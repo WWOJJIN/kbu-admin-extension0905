@@ -1,10 +1,14 @@
 import { useEffect } from "react";
 import Navbar from "./components/Navbar.jsx";
 import BriefingPage from "./components/BriefingPage.jsx";
+// 2026-09-07: "협조문이랑 캘린더페이지랑 합치자" 요청으로 CalendarPage.jsx는
+// 더 이상 별도 탭으로 라우팅하지 않는다(CoopPage.jsx가 흡수 — 그 파일 상단
+// 주석 참고). CalendarPage.jsx/CalendarGrid.jsx 파일 자체는 남아있고,
+// CalendarGrid는 CoopPage.jsx가 계속 재사용한다.
 import CoopPage from "./components/CoopPage.jsx";
-import CalendarPage from "./components/CalendarPage.jsx";
 import ChatPage from "./components/ChatPage.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
+import SettingsDevPage from "./components/SettingsDevPage.jsx";
 import ApprovalStatusPage from "./components/ApprovalStatusPage.jsx";
 import StatusChangePage from "./components/StatusChangePage.jsx";
 import CoopDetailModal from "./components/CoopDetailModal.jsx";
@@ -16,9 +20,9 @@ const PAGES = {
   coop: CoopPage,
   approval: ApprovalStatusPage,
   status: StatusChangePage,
-  calendar: CalendarPage,
   chat: ChatPage,
   settings: SettingsPage,
+  settingsDev: SettingsDevPage,
 };
 
 const NEW_DOC_POLL_MS = 15000;

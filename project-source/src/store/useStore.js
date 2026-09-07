@@ -94,7 +94,7 @@ function loadSummarySettings() {
 }
 
 const useStore = create((set, get) => ({
-  activeTab: "coop", // "briefing" | "coop" | "approval" | "calendar" | "chat" | "settings" (2026-08-22: 문서함(doc) 탭 제거, 협조문 탭이 메인 / 2026-08-23: 오늘의 브리핑, 결재현황 탭 추가)
+  activeTab: "coop", // "briefing" | "coop" | "approval" | "status" | "chat" | "settings" | "settingsDev" (2026-08-22: 문서함(doc) 탭 제거, 협조문 탭이 메인 / 2026-08-23: 오늘의 브리핑, 결재현황 탭 추가 / 2026-09-07: 캘린더 탭이 협조문 탭에 흡수, 설정 탭이 사용자용/개발자용으로 분리)
   summarySettings: loadSummarySettings(),
   coopDocs: [],
   selectedDocId: null,

@@ -65,14 +65,25 @@ export default function TaskPanel({ docs }) {
   const [editingId, setEditingId] = useState(null);
   const [page, setPage] = useState(1);
 
-  const pending = docs
-    .filter((d) => d.requires_action && !d.is_completed && !isTooOverdue(d))
+  // 2026-09-07: "메모 작성하고 완료 누르면 메모가 보여야 하는데 안 보인다"
+  // 버그 수정 — 예전엔 완료 처리(is_completed=true) 즉시 목록에서 통째로
+  // 빠져서 그 안에 적어둔 메모(doc.memo)도 같이 사라졌다. 이제는 완료된
+  // 항목도 (그레이스 기간 안이면) 목록에 그대로 남겨서 메모를 계속 볼 수
+  // 있게 하고, 대신 미완료 항목을 항상 위쪽에 먼저 보여준 뒤 완료된 항목을
+  // 최근 완료순으로 그 아래에 이어붙인다.
+  const relevant = docs.filter((d) => d.requires_action && !isTooOverdue(d));
+  const pendingDocs = relevant
+    .filter((d) => !d.is_completed)
     .sort((a, b) => {
       if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline);
       if (a.deadline) return -1;
       if (b.deadline) return 1;
       return b.created_at - a.created_at;
     });
+  const completedDocs = relevant
+    .filter((d) => d.is_completed)
+    .sort((a, b) => (b.completed_at || 0) - (a.completed_at || 0));
+  const pending = [...pendingDocs, ...completedDocs];
 
   const pageCount = Math.max(1, Math.ceil(pending.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -92,53 +103,74 @@ export default function TaskPanel({ docs }) {
     <div className="bg-white rounded-2xl p-5 shadow-brand border border-brand-border/60">
       <h3 className="text-[15px] font-bold text-brand-navy mb-1.5">처리해야 할 일</h3>
       <p className="text-[11.5px] text-brand-muted leading-relaxed mb-3.5">
-        협조문 등에서 조치가 필요하다고 판단된 항목만 자동으로 뜹니다. 직접 추가하려면 옆의 투두리스트를 이용하세요.
+        협조문 등에서 조치가 필요하다고 판단된 항목만 자동으로 뜹니다. 완료한 항목도 메모를 볼 수 있도록 목록에
+        함께 남습니다.
       </p>
 
       {pending.length === 0 ? (
         <p className="text-sm text-brand-muted">처리할 항목이 없습니다.</p>
       ) : (
         <ul className="space-y-2">
-          {pageItems.map((doc) => (
-            <li key={doc.id} className="text-sm bg-brand-alt/70 border border-slate-100 rounded-lg px-3 py-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-brand-navy break-words">{doc.title || "(제목 없음)"}</p>
-                  {doc.deadline && <span className="text-[11px] text-amber-600">마감 {doc.deadline}</span>}
-                  {doc.action_description && (
-                    <p className="text-brand-muted text-xs mt-0.5">{doc.action_description}</p>
-                  )}
-                  {doc.memo && editingId !== doc.id && (
-                    <p className="text-xs text-brand-muted bg-white border border-slate-100 rounded px-1.5 py-1 mt-1.5 whitespace-pre-line">
-                      {doc.memo}
+          {pageItems.map((doc) => {
+            const done = doc.is_completed;
+            return (
+              <li
+                key={doc.id}
+                className={`text-sm border rounded-lg px-3 py-2.5 ${
+                  done ? "bg-white border-slate-100 opacity-70" : "bg-brand-alt/70 border-slate-100"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-brand-navy break-words ${done ? "line-through decoration-slate-300" : ""}`}>
+                      {doc.title || "(제목 없음)"}
                     </p>
-                  )}
+                    {doc.deadline && (
+                      <span className={`text-[11px] ${done ? "text-brand-muted" : "text-amber-600"}`}>
+                        마감 {doc.deadline}
+                      </span>
+                    )}
+                    {doc.action_description && (
+                      <p className="text-brand-muted text-xs mt-0.5">{doc.action_description}</p>
+                    )}
+                    {doc.memo && editingId !== doc.id && (
+                      <p className="text-xs text-brand-muted bg-white border border-slate-100 rounded px-1.5 py-1 mt-1.5 whitespace-pre-line">
+                        {doc.memo}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => setEditingId(editingId === doc.id ? null : doc.id)}
+                      aria-label="메모 추가"
+                      className="text-brand-muted hover:text-brand-blue hover:border-blue-300 text-sm leading-none w-5 h-5 flex items-center justify-center rounded-full border border-brand-border bg-white flex-shrink-0"
+                    >
+                      +
+                    </button>
+                    {done ? (
+                      <span className="text-[11px] font-medium text-emerald-600 whitespace-nowrap flex-shrink-0">
+                        완료됨
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => completeDoc(doc.id)}
+                        className="text-xs underline text-brand-muted hover:text-brand-muted whitespace-nowrap flex-shrink-0"
+                      >
+                        완료
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => setEditingId(editingId === doc.id ? null : doc.id)}
-                    aria-label="메모 추가"
-                    className="text-brand-muted hover:text-brand-blue hover:border-blue-300 text-sm leading-none w-5 h-5 flex items-center justify-center rounded-full border border-brand-border bg-white flex-shrink-0"
-                  >
-                    +
-                  </button>
-                  <button
-                    onClick={() => completeDoc(doc.id)}
-                    className="text-xs underline text-brand-muted hover:text-brand-muted whitespace-nowrap flex-shrink-0"
-                  >
-                    완료
-                  </button>
-                </div>
-              </div>
-              {editingId === doc.id && (
-                <MemoField
-                  value={doc.memo}
-                  onSave={(memo) => saveMemo(doc, memo)}
-                  onCancel={() => setEditingId(null)}
-                />
-              )}
-            </li>
-          ))}
+                {editingId === doc.id && (
+                  <MemoField
+                    value={doc.memo}
+                    onSave={(memo) => saveMemo(doc, memo)}
+                    onCancel={() => setEditingId(null)}
+                  />
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

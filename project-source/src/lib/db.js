@@ -263,8 +263,11 @@ export async function markCoopDocRead(id) {
 }
 
 /**
- * 처리 완료 표시. TaskPanel 액션 목록에서 제거되지만 캘린더 dot은 유지됨
- * (UI 규칙: 완료 처리 = 액션 목록에서 제거 + 캘린더 dot 유지).
+ * 처리 완료 표시. 캘린더 dot은 유지됨.
+ * ⚠️ 2026-09-07: 예전엔 "완료 처리 = 액션 목록에서 제거"였는데, "완료 누르면
+ * 메모가 안 보인다"는 리포트로 TaskPanel.jsx가 완료된 항목도 목록에 계속
+ * 남겨두고(메모 포함) 보여주는 방식으로 바뀌었다 — 그래서 completed_at(완료
+ * 시각)을 같이 기록해서 완료된 항목을 "최근 완료순"으로 정렬할 수 있게 함.
  * @param {string} id
  */
 export async function markCoopDocCompleted(id) {
@@ -272,6 +275,7 @@ export async function markCoopDocCompleted(id) {
   const doc = await db.get(STORE_COOP_DOCS, id);
   if (!doc) return;
   doc.is_completed = true;
+  doc.completed_at = Date.now();
   await db.put(STORE_COOP_DOCS, doc);
 }
 

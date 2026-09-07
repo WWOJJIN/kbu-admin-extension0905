@@ -87,3 +87,30 @@ export function fillParsedFallback(parsed, rawText) {
     requires_action: parsed?.requires_action ?? guessRequiresAction(rawText),
   };
 }
+
+// 2026-09-07: "협조문/결재현황/캘린더/브리핑 전부 최근 한 달치만 불러오도록"
+// 요청 — 화면 표시 단계에서 공통으로 쓸 "최근 N일 이내인지" 판정 유틸.
+// ⚠️ store.coopDocs(useStore.js loadCoopDocs) 자체는 건드리지 않는다 —
+// backfillMissingDrafters/pruneOutOfScopeCoopDocs 등 내부 정리 로직은 오래된
+// 문서도 계속 봐야 하므로, 필터링은 각 페이지 컴포넌트가 표시 직전에 한 번
+// 더 거는 방식으로 적용한다(CoopPage.jsx/BriefingPage.jsx 등 참고).
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const RECENT_DOCS_DAYS = 30;
+
+/**
+ * dateStr(YYYY-MM-DD)이 오늘 기준 최근 days일 이내인지 판정한다. 미래 날짜는
+ * (드물지만 시계 오차 등으로) 항상 "최근"으로 취급하고, 날짜 자체가 없거나
+ * 파싱이 안 되면 안전하게 false(=제외) 처리한다.
+ * @param {string|null|undefined} dateStr
+ * @param {number} days
+ * @returns {boolean}
+ */
+export function isWithinRecentDays(dateStr, days = RECENT_DOCS_DAYS) {
+  if (!dateStr) return false;
+  const target = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return false;
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((todayMid.getTime() - target.getTime()) / MS_PER_DAY);
+  return diffDays <= days;
+}

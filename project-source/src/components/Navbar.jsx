@@ -12,14 +12,17 @@ import { useEffect, useState } from "react";
 import useStore from "../store/useStore.js";
 import { getNewCoopDocs, getFeatureToggles } from "../lib/db.js";
 
+// 2026-09-07: "협조문이랑 캘린더페이지랑 합치자" 요청으로 "캘린더" 탭 제거
+// (CoopPage.jsx가 캘린더를 흡수). "설정을 사용자용/개발자용으로 나눠줘"
+// 요청으로 "설정" 탭 하나를 "사용자 설정"/"개발자 설정" 두 개로 분리.
 const TABS = [
   { key: "briefing", label: "브리핑", icon: "🗂️" },
   { key: "coop", label: "협조문", icon: "📄" },
   { key: "approval", label: "결재현황", icon: "✅" },
   { key: "status", label: "학적변동", icon: "🎓" },
-  { key: "calendar", label: "캘린더", icon: "📅" },
   { key: "chat", label: "챗봇", icon: "💬" },
-  { key: "settings", label: "설정", icon: "⚙️" },
+  { key: "settings", label: "사용자 설정", icon: "⚙️" },
+  { key: "settingsDev", label: "개발자 설정", icon: "🛠️" },
 ];
 
 export const SIDEBAR_WIDTH_CLASS = "w-72"; // App.jsx의 콘텐츠 영역 ml-72와 반드시 맞출 것 (목업 사이드바 폭과 동일)
@@ -42,14 +45,21 @@ export default function Navbar() {
     getFeatureToggles().then(setFeatureToggles);
   }, [activeTab]); // 설정 탭에서 토글을 바꾸고 다른 탭으로 돌아올 때 반영되게 activeTab 변화마다 재조회
 
+  // "settings"/"settingsDev"는 탭 켜고끄기 대상이 아니라 항상 보이게 둔다 —
+  // 설정 탭 자체를 끄면 다시 켤 방법이 없어지기 때문(2026-09-07: 설정 탭이
+  // 사용자용/개발자용 둘로 나뉘면서 둘 다 예외 처리).
   const visibleTabs = TABS.filter(
-    (tab) => tab.key === "settings" || !featureToggles || featureToggles[tab.key] !== false
+    (tab) =>
+      tab.key === "settings" || tab.key === "settingsDev" || !featureToggles || featureToggles[tab.key] !== false
   );
 
-  // 지금 보고 있는 탭이 방금 꺼졌으면 캘린더로 되돌린다(kbu applyFeatureVisibility와 동일한 안전장치).
+  // 지금 보고 있는 탭이 방금 꺼졌으면 협조문 탭으로 되돌린다(kbu
+  // applyFeatureVisibility와 동일한 안전장치). 2026-09-07: 캘린더 탭이
+  // 없어져서 예전 fallback("calendar")은 더 이상 유효한 탭이 아니므로 "coop"로
+  // 변경.
   useEffect(() => {
-    if (featureToggles && featureToggles[activeTab] === false && activeTab !== "settings") {
-      setActiveTab("calendar");
+    if (featureToggles && featureToggles[activeTab] === false && activeTab !== "settings" && activeTab !== "settingsDev") {
+      setActiveTab("coop");
     }
   }, [featureToggles, activeTab, setActiveTab]);
 

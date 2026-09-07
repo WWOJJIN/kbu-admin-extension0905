@@ -1,17 +1,48 @@
 // src/components/CoopPage.jsx
 // 협조문 탭 전체.
+//
+// 2026-09-07: "협조문이랑 캘린더페이지랑 합치자" 요청으로 캘린더 탭을 이
+// 페이지에 흡수했다. 왼쪽엔 협조문 카드(2열), 오른쪽엔 달력 + 처리해야 할 일
+// (TaskPanel)을 배치. 투두리스트/메모(TodoListPanel.jsx/NotesPanel.jsx)는
+// 요청대로 이 화면에서 뺐다 — 두 컴포넌트 파일 자체는 그대로 남아있지만
+// 캘린더 탭이 없어지면서 더 이상 어디서도 쓰이지 않는다. 그에 맞춰 캘린더
+// dot도 협조문 마감(deadline)만 남기고, 투두 dot/날짜 선택 기능은 뺐다
+// (선택 기능은 TodoListPanel에 새 할 일 날짜를 채워주기 위한 용도였는데,
+// 그 패널 자체가 없어졌으므로). 네브바의 "캘린더" 탭과 App.jsx의 관련 라우팅도
+// 같이 정리했다(Navbar.jsx/App.jsx 참고). 예전 CalendarPage.jsx/
+// CalendarGrid.jsx는 그대로 남겨뒀고, CalendarGrid는 이 페이지에서 계속
+// 재사용한다.
+//
+// 2026-09-07(2): "최근 한 달치만 불러오도록" 요청 — 협조문(이 페이지)·
+// 캘린더(=이 페이지에 흡수됨)·브리핑 탭이 공유하는 store.coopDocs 전체가
+// 아니라, 기안일(doc.date) 기준 최근 30일 문서만 걸러서 화면에 보여준다.
+// store.coopDocs 자체(useStore.js loadCoopDocs)는 그대로 전체를 유지한다 —
+// backfillMissingDrafters/pruneOutOfScopeCoopDocs 같은 내부 정리 로직은 오래된
+// 문서도 계속 봐야 하기 때문에, 필터링은 화면 표시 시점(이 컴포넌트)에서만
+// 한 번 더 건다.
+//
+// 2026-09-07(3): "협조문 탭에서는 AI요약 전부 다 보이게" 요청 — 설정 탭의
+// 펼침 정책(summarySettings: 전부펼쳐보기/최근만/읽은건접기)은 그대로 두되,
+// 이 탭의 카드에는 CoopCard의 forceExpanded prop을 true로 내려줘서 정책과
+// 무관하게 항상 펼쳐서 보여준다(다른 곳에서 CoopCard를 다시 쓰게 되면 그
+// 쪽은 원래 정책을 그대로 따르도록 prop 기본값은 false로 둠).
 
 import { useEffect, useMemo, useState } from "react";
 import useStore from "../store/useStore.js";
 import CoopCard from "./CoopCard.jsx";
+import CalendarGrid from "./CalendarGrid.jsx";
+import TaskPanel from "./TaskPanel.jsx";
 // CoopDetailModal은 App.jsx로 옮김 — 브리핑 탭 등 다른 탭에서 문서를 열어도
 // 탭 이동 없이 그 자리에서 팝업이 뜨도록 selectedDocId 기준으로 항상 마운트됨
 // (2026-08-23(2)).
 import DeptFilterSelect from "./DeptFilterSelect.jsx";
 import { mockSummarize, fetchPersOfrdDeptList } from "../lib/kisApi.js";
+import { isWithinRecentDays, RECENT_DOCS_DAYS } from "../lib/textUtils.js";
 
-// 3열 × 4줄 = 12개씩 페이지네이션.
-const PAGE_SIZE = 12;
+// 2열 × 4줄 = 8개씩 페이지네이션.
+// 2026-09-07: 캘린더와 한 화면을 나눠 쓰게 되면서 카드 열이 3열→2열로
+// 좁아져 페이지당 개수도 12(3×4)에서 8(2×4)로 줄임.
+const PAGE_SIZE = 8;
 // 2026-08-22(10): 페이지 번호 버튼을 한 번에 4개씩만 보여주고(1~4, 5~8, ...),
 // 그 범위를 벗어나면 화살표로 다음/이전 묶음으로 넘어가게. 화살표는 그냥
 // 페이지를 1씩 옮길 뿐인데, 4페이지 창(윈도우)이 "현재 페이지가 속한 4개
@@ -20,17 +51,12 @@ const PAGE_SIZE = 12;
 const PAGE_WINDOW = 4;
 
 export default function CoopPage() {
-  const coopDocs = useStore((s) => s.coopDocs);
+  const allCoopDocs = useStore((s) => s.coopDocs);
   const loadCoopDocs = useStore((s) => s.loadCoopDocs);
   const openDetail = useStore((s) => s.openDetail);
   const selectedDeptGroupKey = useStore((s) => s.selectedDeptGroupKey);
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
-  // 2026-09-05(8): "신규20이랑 전체랑 합쳐서 전체로 만들어줘" 요청 —
-  // 신규/전체 클릭 탭(newFilter)을 완전히 없애고 항상 전체 문서를 한
-  // 목록으로 보여줌. NEW 배지 자체(카드에 뜨는 표시, isRecentDoc 기준)는
-  // 목록 필터링과 별개 로직이라 그대로 남아있음 — 없어지는 건 "신규만
-  // 걸러서 보기" 기능뿐.
   // 2026-08-23(14): 아래 availableDepts 참고 — ERP "findPersOfordDeptList.do"
   // (내 소속 부서 전체) 응답을 담아둠. 문서 유무와 무관하게 항상 ERP
   // 드롭다운과 똑같은 부서 목록을 보여주기 위한 보조 상태.
@@ -39,6 +65,16 @@ export default function CoopPage() {
   useEffect(() => {
     loadCoopDocs();
   }, [loadCoopDocs]);
+
+  // 2026-09-07: "최근 한 달치만 불러오도록" — 표시용 목록을 기안일(date)
+  // 기준 최근 30일로 한 번 걸러낸다. 부서 필터 드롭다운(availableDepts)도
+  // 이 최근 목록 기준으로 만들어서, 지금은 문서가 없는(1개월 밖으로 밀려난)
+  // 부서까지 드롭다운에 남지 않게 한다(단, myDeptNames로 ERP 공식 부서 목록은
+  // 여전히 항상 합쳐지므로 소속 부서 자체가 사라지진 않는다).
+  const recentDocs = useMemo(
+    () => allCoopDocs.filter((d) => isWithinRecentDays(d.date, RECENT_DOCS_DAYS)),
+    [allCoopDocs]
+  );
 
   // 2026-08-23(14): Claude in Chrome으로 실제 로그인된 kis.kbu.ac.kr 세션에
   // 직접 들어가 협조문수신함 화면의 부서 드롭다운을 열어 실측한 결과, ERP는
@@ -78,12 +114,12 @@ export default function CoopPage() {
   // 남고, 문서가 아직 하나도 없는 부서도 ERP 목록 쪽에서 채워진다.
   const availableDepts = useMemo(
     () =>
-      [...new Set([...myDeptNames, ...coopDocs.map((d) => d.recv_dept_name).filter(Boolean)])].sort(),
-    [coopDocs, myDeptNames]
+      [...new Set([...myDeptNames, ...recentDocs.map((d) => d.recv_dept_name).filter(Boolean)])].sort(),
+    [recentDocs, myDeptNames]
   );
   const deptFilteredDocs = selectedDeptGroupKey
-    ? coopDocs.filter((d) => d.recv_dept_name === selectedDeptGroupKey)
-    : coopDocs;
+    ? recentDocs.filter((d) => d.recv_dept_name === selectedDeptGroupKey)
+    : recentDocs;
   const scopedDocs = deptFilteredDocs;
 
   // 2026-08-22(6): 검색창 — 버튼 없이 입력하는 즉시(onChange) 필터링. 제목/
@@ -125,8 +161,31 @@ export default function CoopPage() {
   const windowEnd = Math.min(windowStart + PAGE_WINDOW - 1, totalPages);
   const pageDocs = visibleDocs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
+  // 2026-09-07: 캘린더 블록(예전 CalendarPage.jsx)에서 그대로 가져온 월 이동
+  // 상태. 투두 dot/날짜 선택은 TodoListPanel과 함께 뺐으므로 selectedDate 같은
+  // 상태는 더 이상 필요 없다.
+  const [cursor, setCursor] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const monthLabel = new Date(cursor.year, cursor.month, 1).toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "long",
+  });
+  const goPrevMonth = () =>
+    setCursor((c) => (c.month === 0 ? { year: c.year - 1, month: 11 } : { year: c.year, month: c.month - 1 }));
+  const goNextMonth = () =>
+    setCursor((c) => (c.month === 11 ? { year: c.year + 1, month: 0 } : { year: c.year, month: c.month + 1 }));
+
+  let emptyMessage = "이 부서에 해당하는 협조문이 없습니다.";
+  if (allCoopDocs.length === 0) {
+    emptyMessage = "아직 수신된 협조문이 없습니다.";
+  } else if (recentDocs.length === 0) {
+    emptyMessage = `최근 ${RECENT_DOCS_DAYS}일 이내 수신된 협조문이 없습니다.`;
+  }
+
   return (
-    <div className="p-4 max-w-6xl mx-auto">
+    <div className="p-4 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg font-semibold text-brand-navy shrink-0">협조문수신함</h2>
       </div>
@@ -142,87 +201,100 @@ export default function CoopPage() {
           <DeptFilterSelect options={availableDepts} />
         </div>
       </div>
-      {visibleDocs.length === 0 ? (
-        <p className="text-brand-muted text-sm">
-          {coopDocs.length === 0 ? "아직 수신된 협조문이 없습니다." : "이 부서에 해당하는 협조문이 없습니다."}
-        </p>
-      ) : (
-        // 2026-09-05: 타임라인형을 한 번 적용했다가, "타임라인 없이 지금 카드
-        // 모양 유지해서 2열로 해줄 수 있어?" 요청으로 다시 카드 그리드로 원복.
-        // 이후 "한줄에 3개 들어가게 해줘" 요청으로 데스크톱 기준 3열로 재조정
-        // (모바일 1열 → 태블릿 2열 → 데스크톱 3열).
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-          {pageDocs.map((doc) => (
-            <CoopCard
-              key={doc.id}
-              doc={doc}
-              onClick={() => openDetail(doc.id)}
-              // 2026-09-05(8): 신규/전체 탭이 없어지면서 "탭에 따라 펼침 여부
-              // 결정" 방식도 같이 폐기 — 원래 설계(설정 탭 summarySettings)로
-              // 복귀. CoopCard.jsx가 store의 summarySettings를 직접 읽어서
-              // 카드별로 펼침 여부를 정한다(expanded prop 없이).
-            />
-          ))}
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* 협조문 카드 2열 */}
+        <div className="xl:col-span-7">
+          {visibleDocs.length === 0 ? (
+            <p className="text-brand-muted text-sm">{emptyMessage}</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+              {pageDocs.map((doc) => (
+                <CoopCard key={doc.id} doc={doc} onClick={() => openDetail(doc.id)} forceExpanded />
+              ))}
+            </div>
+          )}
+          {/* 2026-08-22(7): "12개 있어도 페이지가 안 넘어간다" 리포트 대응 —
+              totalPages가 1이어도(=문서 개수가 적음) 페이지네이션 자체는 항상
+              그려서 "왜 안 넘어가는지"(페이지가 1개뿐이라 넘어갈 데가 없는 건지,
+              진짜 버그인지)를 눈으로 바로 확인할 수 있게 함. 스타일은 숫자 버튼형
+              (B안)으로 변경. */}
+          {visibleDocs.length > 0 && (
+            <div className="flex items-center justify-center gap-1.5 mt-6">
+              {/* 2026-08-22(11): 한 페이지씩 넘기는 ‹/›와 별개로, 묶음(4페이지)
+                  단위로 한 번에 넘기는 «/» 추가. windowStart가 이미 1묶음째면
+                  «는 비활성화, 다음 묶음이 없으면(windowStart + PAGE_WINDOW가
+                  totalPages를 넘으면) »도 비활성화. */}
+              <button
+                onClick={() => setPage(Math.max(1, windowStart - PAGE_WINDOW))}
+                disabled={windowStart === 1}
+                aria-label="이전 페이지 묶음"
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
+              >
+                «
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+                aria-label="이전 페이지"
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
+              >
+                ‹
+              </button>
+              {Array.from({ length: windowEnd - windowStart + 1 }, (_, i) => windowStart + i).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setPage(n)}
+                  className={
+                    n === safePage
+                      ? "w-7 h-7 flex items-center justify-center rounded-md text-sm font-medium bg-brand-blue text-white"
+                      : "w-7 h-7 flex items-center justify-center rounded-md text-sm text-brand-muted border border-brand-border hover:bg-brand-alt"
+                  }
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+                aria-label="다음 페이지"
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
+              >
+                ›
+              </button>
+              <button
+                onClick={() => setPage(Math.min(totalPages, windowStart + PAGE_WINDOW))}
+                disabled={windowStart + PAGE_WINDOW > totalPages}
+                aria-label="다음 페이지 묶음"
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
+              >
+                »
+              </button>
+            </div>
+          )}
         </div>
-      )}
-      {/* 2026-08-22(7): "12개 있어도 페이지가 안 넘어간다" 리포트 대응 —
-          totalPages가 1이어도(=문서 12개 이하) 페이지네이션 자체는 항상
-          그려서 "왜 안 넘어가는지"(페이지가 1개뿐이라 넘어갈 데가 없는 건지,
-          진짜 버그인지)를 눈으로 바로 확인할 수 있게 함. 스타일은 숫자 버튼형
-          (B안)으로 변경. */}
-      {visibleDocs.length > 0 && (
-        <div className="flex items-center justify-center gap-1.5 mt-6">
-          {/* 2026-08-22(11): 한 페이지씩 넘기는 ‹/›와 별개로, 묶음(4페이지)
-              단위로 한 번에 넘기는 «/» 추가. windowStart가 이미 1묶음째면
-              «는 비활성화, 다음 묶음이 없으면(windowStart + PAGE_WINDOW가
-              totalPages를 넘으면) »도 비활성화. */}
-          <button
-            onClick={() => setPage(Math.max(1, windowStart - PAGE_WINDOW))}
-            disabled={windowStart === 1}
-            aria-label="이전 페이지 묶음"
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
-          >
-            «
-          </button>
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage === 1}
-            aria-label="이전 페이지"
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
-          >
-            ‹
-          </button>
-          {Array.from({ length: windowEnd - windowStart + 1 }, (_, i) => windowStart + i).map((n) => (
-            <button
-              key={n}
-              onClick={() => setPage(n)}
-              className={
-                n === safePage
-                  ? "w-7 h-7 flex items-center justify-center rounded-md text-sm font-medium bg-brand-blue text-white"
-                  : "w-7 h-7 flex items-center justify-center rounded-md text-sm text-brand-muted border border-brand-border hover:bg-brand-alt"
-              }
-            >
-              {n}
-            </button>
-          ))}
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage === totalPages}
-            aria-label="다음 페이지"
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
-          >
-            ›
-          </button>
-          <button
-            onClick={() => setPage(Math.min(totalPages, windowStart + PAGE_WINDOW))}
-            disabled={windowStart + PAGE_WINDOW > totalPages}
-            aria-label="다음 페이지 묶음"
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-brand-border text-brand-muted disabled:opacity-30 disabled:cursor-default hover:bg-brand-alt"
-          >
-            »
-          </button>
+
+        {/* 캘린더 + 처리해야 할 일 (2026-09-07: 캘린더 탭 흡수) */}
+        <div className="xl:col-span-5 flex flex-col gap-5">
+          <div className="bg-white rounded-2xl p-5 shadow-brand border border-brand-border/60">
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={goPrevMonth} className="px-2 text-brand-muted hover:text-brand-navy" aria-label="이전 달">
+                ←
+              </button>
+              <h2 className="text-[15px] font-bold text-brand-navy">{monthLabel}</h2>
+              <button onClick={goNextMonth} className="px-2 text-brand-muted hover:text-brand-navy" aria-label="다음 달">
+                →
+              </button>
+            </div>
+            <CalendarGrid docs={recentDocs} year={cursor.year} month={cursor.month} />
+            <p className="text-[11px] text-brand-muted flex items-center gap-1.5 mt-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-alt0 inline-block" /> 협조문 마감
+            </p>
+          </div>
+
+          <TaskPanel docs={recentDocs} />
         </div>
-      )}
+      </div>
     </div>
   );
 }

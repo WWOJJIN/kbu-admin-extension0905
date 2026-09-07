@@ -16,6 +16,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchExpenseTravelList, fetchInternalDraftList } from "../lib/kisApi.js";
 
+// 2026-09-07: "결재현황도 한 달치만 나오게" 요청 — ERP가 돌려주는 draftDt/
+// aprvDttm은 "YYYYMMDDHHmmssSSS"(17자리) 원본 숫자 문자열이라(위 formatDateTime
+// 참고), textUtils.js의 isWithinRecentDays(YYYY-MM-DD 전용)를 그대로 못 써서
+// 이 화면 전용으로 raw 날짜 문자열을 바로 받는 버전을 따로 둔다.
+const RECENT_APPROVAL_DAYS = 30;
+function isRecentRawDate(raw, days = RECENT_APPROVAL_DAYS) {
+  if (!raw) return false;
+  const digits = String(raw).replace(/\D/g, "");
+  if (digits.length < 8) return false;
+  const target = new Date(
+    Number(digits.slice(0, 4)),
+    Number(digits.slice(4, 6)) - 1,
+    Number(digits.slice(6, 8))
+  );
+  if (Number.isNaN(target.getTime())) return false;
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((todayMid.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
+  return diffDays <= days;
+}
+
 const TABS = [
   { key: "all", label: "전체" },
   { key: "expense", label: "지출/출장" },
@@ -155,7 +176,9 @@ export default function ApprovalStatusPage() {
     Promise.allSettled([fetchExpenseTravelList(), fetchInternalDraftList()]).then(([exp, intr]) => {
       if (cancelled) return;
       if (exp.status === "fulfilled") {
-        setExpenseItems((exp.value || []).map(normalizeExpenseItem));
+        // 2026-09-07: 정규화(normalizeExpenseItem)로 만든 sortKey가 raw 날짜
+        // 문자열 그대로라 여기서 바로 최근 30일 필터를 걸 수 있다.
+        setExpenseItems((exp.value || []).map(normalizeExpenseItem).filter((it) => isRecentRawDate(it.sortKey)));
         // ⚠️ 2026-08-23(10) 디버그용: lastAprvUser/aprvLevel 필드가 이 화면
         // 응답에 실제로 오는지 콘솔로 바로 확인 가능하게 원본 행 하나를 남김.
         // "OOO 결재중" 표시가 안 뜨면 이 로그로 필드명이 다른지부터 확인할 것.
@@ -165,7 +188,7 @@ export default function ApprovalStatusPage() {
         setErrors((e) => ({ ...e, expense: exp.reason?.message || "조회 실패" }));
       }
       if (intr.status === "fulfilled") {
-        setInternalItems((intr.value || []).map(normalizeInternalItem));
+        setInternalItems((intr.value || []).map(normalizeInternalItem).filter((it) => isRecentRawDate(it.sortKey)));
         if (intr.value?.[0]) console.debug("[ApprovalStatusPage] 내부기안 원본 필드 샘플:", intr.value[0]);
       } else {
         console.warn("[ApprovalStatusPage] 내부기안결재현황 조회 실패:", intr.reason);
@@ -200,7 +223,9 @@ export default function ApprovalStatusPage() {
     <div className="p-4 max-w-5xl mx-auto">
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-brand-navy">결재 현황</h2>
-        <p className="text-sm text-brand-muted mt-0.5">ERP 연동 지출·출장 및 내부기안 결재 현황을 통합 관리합니다.</p>
+        <p className="text-sm text-brand-muted mt-0.5">
+          ERP 연동 지출·출장 및 내부기안 결재 현황을 통합 관리합니다. (최근 {RECENT_APPROVAL_DAYS}일 이내 건만 표시)
+        </p>
       </div>
 
       {hasAnyError && (

@@ -177,12 +177,16 @@ function formatSummaryForReadability(text) {
   return sentences.map((s) => `- ${s}`).join("\n");
 }
 
-export default function CoopCard({ doc, onClick }) {
+export default function CoopCard({ doc, onClick, forceExpanded = false }) {
   // 2026-09-05(8): expanded를 더 이상 부모(CoopPage.jsx)가 내려주지 않음 —
   // 설정 탭에서 고른 summarySettings를 이 카드가 직접 구독해서 문서별로
   // 펼침 여부를 계산한다.
+  // 2026-09-07: "협조문 탭에서는 AI요약 전부 다 보이게" 요청 — forceExpanded가
+  // true면 summarySettings 정책과 무관하게 무조건 펼친다(지금은 CoopPage.jsx만
+  // true로 넘김). 다른 화면에서 이 카드를 다시 쓰게 되면 기본값 false라 원래
+  // 정책을 그대로 따른다.
   const summarySettings = useStore((s) => s.summarySettings);
-  const expanded = getDefaultExpanded(doc, summarySettings);
+  const expanded = forceExpanded || getDefaultExpanded(doc, summarySettings);
   // 2026-09-05 수정: ai_summary가 비어서 mockSummarize(본문 앞부분을 그냥 잘라낸
   // 발췌, AI 아님)로 대체되는 경우에도 라벨이 계속 "AI Summary"로 고정 표시돼서
   // 실사용 중 "이거 그냥 본문 복붙 아니냐"는 혼란이 있었음 — isRealAiSummary로
