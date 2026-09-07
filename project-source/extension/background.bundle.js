@@ -1049,6 +1049,7 @@ function fillParsedFallback(parsed, rawText) {
     requires_action: parsed?.requires_action ?? guessRequiresAction(rawText)
   };
 }
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // extension/background.js
 var POLL_ALARM_NAME = "coopDocPoll";
