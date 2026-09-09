@@ -33,6 +33,28 @@ function isTooOverdue(doc) {
   return daysPast > OVERDUE_GRACE_DAYS;
 }
 
+// 2026-09-07(5): "배치/형태만 시안처럼" 요청 — 마감일 표시를 그냥 날짜만
+// 찍던 것에서 D-day 형태(N일 남음/오늘 마감/N일 지남)로 바꿈. 새 데이터를
+// 쓰는 게 아니라 기존 doc.deadline을 그대로 계산해서 보여주는 것뿐.
+function formatDday(deadline) {
+  const target = new Date(`${deadline}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((target.getTime() - todayMid.getTime()) / MS_PER_DAY);
+  if (diffDays > 0) return `${diffDays}일 남음`;
+  if (diffDays === 0) return "오늘 마감";
+  return `${-diffDays}일 지남`;
+}
+
+// 완료 처리 시각(completed_at)을 "M/D 완료 처리" 짧은 형태로.
+function formatCompletedAt(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getMonth() + 1}/${d.getDate()} 완료 처리`;
+}
+
 function MemoField({ value, onSave, onCancel }) {
   const [draft, setDraft] = useState(value || "");
   return (
@@ -113,6 +135,8 @@ export default function TaskPanel({ docs }) {
         <ul className="space-y-2">
           {pageItems.map((doc) => {
             const done = doc.is_completed;
+            const dday = doc.deadline ? formatDday(doc.deadline) : null;
+            const completedLabel = done ? formatCompletedAt(doc.completed_at) : null;
             return (
               <li
                 key={doc.id}
@@ -120,15 +144,34 @@ export default function TaskPanel({ docs }) {
                   done ? "bg-white border-slate-100 opacity-70" : "bg-brand-alt/70 border-slate-100"
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5">
+                  {/* 2026-09-07(5): "완료" 텍스트 버튼 대신 체크박스 모양으로 —
+                      동작은 기존 completeDoc 그대로(완료 취소 기능은 store에
+                      원래 없어서 추가하지 않음, 완료된 항목은 체크된 채로 고정). */}
+                  <button
+                    onClick={() => !done && completeDoc(doc.id)}
+                    disabled={done}
+                    aria-label={done ? "완료됨" : "완료 처리"}
+                    className={`mt-0.5 w-[18px] h-[18px] flex-shrink-0 rounded-[5px] border flex items-center justify-center transition ${
+                      done
+                        ? "bg-emerald-500 border-emerald-500 text-white cursor-default"
+                        : "border-brand-border bg-white hover:border-brand-blue text-transparent"
+                    }`}
+                  >
+                    <svg viewBox="0 0 12 10" fill="none" className="w-2.5 h-2.5">
+                      <path d="M1 5L4.5 8.5L11 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
                   <div className="min-w-0 flex-1">
                     <p className={`text-brand-navy break-words ${done ? "line-through decoration-slate-300" : ""}`}>
                       {doc.title || "(제목 없음)"}
                     </p>
-                    {doc.deadline && (
-                      <span className={`text-[11px] ${done ? "text-brand-muted" : "text-amber-600"}`}>
-                        마감 {doc.deadline}
-                      </span>
+                    {done ? (
+                      completedLabel && (
+                        <span className="text-[11px] text-emerald-600">{completedLabel}</span>
+                      )
+                    ) : (
+                      dday && <span className="text-[11px] text-amber-600">마감 {doc.deadline} · {dday}</span>
                     )}
                     {doc.action_description && (
                       <p className="text-brand-muted text-xs mt-0.5">{doc.action_description}</p>
@@ -138,36 +181,22 @@ export default function TaskPanel({ docs }) {
                         {doc.memo}
                       </p>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => setEditingId(editingId === doc.id ? null : doc.id)}
-                      aria-label="메모 추가"
-                      className="text-brand-muted hover:text-brand-blue hover:border-blue-300 text-sm leading-none w-5 h-5 flex items-center justify-center rounded-full border border-brand-border bg-white flex-shrink-0"
-                    >
-                      +
-                    </button>
-                    {done ? (
-                      <span className="text-[11px] font-medium text-emerald-600 whitespace-nowrap flex-shrink-0">
-                        완료됨
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => completeDoc(doc.id)}
-                        className="text-xs underline text-brand-muted hover:text-brand-muted whitespace-nowrap flex-shrink-0"
-                      >
-                        완료
-                      </button>
+                    {editingId === doc.id && (
+                      <MemoField
+                        value={doc.memo}
+                        onSave={(memo) => saveMemo(doc, memo)}
+                        onCancel={() => setEditingId(null)}
+                      />
                     )}
                   </div>
+                  <button
+                    onClick={() => setEditingId(editingId === doc.id ? null : doc.id)}
+                    aria-label="메모 추가"
+                    className="text-brand-muted hover:text-brand-blue hover:border-blue-300 text-sm leading-none w-5 h-5 flex items-center justify-center rounded-full border border-brand-border bg-white flex-shrink-0"
+                  >
+                    +
+                  </button>
                 </div>
-                {editingId === doc.id && (
-                  <MemoField
-                    value={doc.memo}
-                    onSave={(memo) => saveMemo(doc, memo)}
-                    onCancel={() => setEditingId(null)}
-                  />
-                )}
               </li>
             );
           })}

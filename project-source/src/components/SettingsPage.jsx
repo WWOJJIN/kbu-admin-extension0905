@@ -33,8 +33,8 @@ const WEEK_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
 // 이유로 FEATURE_TAB_IDS에서 자기 자신은 제외).
 // 2026-09-07: "캘린더" 항목 제거 — 협조문 탭이 캘린더를 흡수하면서 네브바의
 // 별도 캘린더 탭이 없어졌다(CoopPage.jsx/Navbar.jsx 참고).
+// 2026-09-07(29): "브리핑 탭 날려줘" 요청으로 "브리핑" 항목도 같이 제거.
 const FEATURE_TAB_ITEMS = [
-  { key: "briefing", label: "브리핑" },
   { key: "coop", label: "협조문" },
   { key: "approval", label: "결재현황" },
   { key: "chat", label: "챗봇" },

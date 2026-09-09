@@ -111,34 +111,12 @@ function HeaderBadge({ doc }) {
   return null;
 }
 
-function StatusBadge({ doc }) {
-  if (doc.requires_action && !doc.is_completed) {
-    // 2026-09-05(2): action_type이 있으면 "처리 필요"라는 뭉뚱그린 표현 대신
-    // "회신 필요"/"제출 필요"처럼 구체적으로 보여준다 — 실사용 피드백("회신인지
-    // 제출인지 확인해야하는지 여부를 알려줬으면") 반영.
-    const label = doc.action_type ? `${doc.action_type} 필요` : "처리 필요";
-    return (
-      <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-[6px] bg-[#FDF3E7] text-[#D9822B]">
-        {label}
-      </span>
-    );
-  }
-  if (doc.is_completed) {
-    return (
-      <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-[6px] bg-[#EAF7F1] text-[#1E9E6E]">
-        완료
-      </span>
-    );
-  }
-  if (doc.calendar_registered) {
-    return (
-      <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-[6px] bg-[#F5F7FF] text-[#3D57E8]">
-        캘린더 등록됨
-      </span>
-    );
-  }
-  return null;
-}
+// 2026-09-07(13): "요 상태 값은 필요 없을듯" 요청 — 마감일 줄 오른쪽의
+// StatusBadge(완료/제출 필요/캘린더 등록됨 배지)를 없앰. 이 컴포넌트를 쓰던
+// 곳이 여기 하나뿐이라 죽은 코드로 안 남기려고 정의도 같이 삭제. "제출 필요"
+// 류 정보는 AI Summary 라벨 줄의 action_type 배지로 여전히 보이지만, "완료"
+// 상태 자체를 별도 배지로 보여주는 곳은 이제 카드에 없음(마감 옆 텍스트가
+// 사라지지 않으니 필요하면 나중에 다시 넣을 수 있음).
 
 // 2026-09-05(8) 추가: useStore.js 상단 주석(loadSummarySettings 근처)에 적힌
 // 원래 스펙 그대로 복원 —
@@ -203,7 +181,7 @@ export default function CoopCard({ doc, onClick, forceExpanded = false }) {
           카드 모서리에 걸쳐 있던 NEW 배지를 발신부서 줄과 같은 행에 나란히
           배치(HeaderBadge)하도록 바꿈. 정보(부서/제목/수신/마감) → AI요약
           순서는 기존 결정(2026-08-22(3)) 그대로 유지. */}
-      <button type="button" onClick={onClick} className="w-full text-left px-3.5 pt-3 pb-3 hover:bg-brand-alt/60 transition">
+      <button type="button" onClick={onClick} className="w-full text-left px-3.5 pt-2 pb-2.5 hover:bg-brand-alt/60 transition">
         {/* 2026-08-22(11): "접었는데도 카드 크기가 들쭉날쭉하다" 리포트 대응 —
             제목(title)은 원래 요청대로 안 잘리게 그대로 두지만, 발신부서/
             기안자 줄이랑 수신부서/날짜 줄은 부서명 길이에 따라(예: "소프트웨어
@@ -222,21 +200,22 @@ export default function CoopCard({ doc, onClick, forceExpanded = false }) {
           </div>
           <HeaderBadge doc={doc} />
         </div>
-        {/* 2026-08-22(13): AI요약 박스 크기는 이제 다 맞는데, "AI요약 시작점"
-            자체가 카드마다 달랐던 진짜 원인 — 제목이 1줄인 카드랑 2줄인 카드가
-            섞여있으니 그 아래 AI요약이 시작하는 위치가 다를 수밖에 없었음
-            (제목을 안 자르기로 했으니 당연한 결과). 제목 자리에 2줄 높이를
-            항상 미리 확보해둬서(min-h), 1줄 제목은 그 밑에 빈 여백이 남고
-            2줄 제목은 꽉 채우는 식으로 — AI요약 시작점이 항상 같은 위치에
-            오게 함. 3줄 넘는 제목은 그대로 더 밀려나지만(드묾), 제목을 자르지
-            않는다는 원칙은 유지. */}
-        <p className="text-[13.5px] font-bold text-[#1A1B2E] mt-[5px] leading-[1.4] min-h-[38px]">
+        {/* 2026-08-22(13): (예전 메모) 2열 그리드였을 때는 카드마다 제목 줄수가
+            달라 그 아래 AI요약 시작점이 들쭉날쭉해 보여서 min-h로 2줄 높이를
+            항상 미리 확보해뒀었다.
+            2026-09-07(11): "카드가 세로로 너무 길다" 요청 — 지금은 1열
+            리스트라 카드끼리 나란히 줄맞출 일이 없어졌으니, 그 min-h를 빼서
+            제목이 1줄이면 카드도 그만큼 짧아지게 함(제목을 자르지 않는 원칙은
+            그대로 유지).
+            2026-09-07(12): "상단 여백 없애줘" 요청 — 헤더 줄(부서·기안자/NEW)과
+            제목 사이 간격을 5px에서 2px로 더 줄임. */}
+        <p className="text-[13.5px] font-bold text-[#1A1B2E] mt-0.5 leading-[1.4]">
           {doc.title || "(제목 없음)"}
         </p>
         {/* 2026-08-23(12): 수신/일자 줄에 작은 아이콘 추가(시안 반영) — 단일
             색(slate-400)만 써서 튀지 않게. */}
         {(doc.recv_dept_name || doc.date) && (
-          <p className="flex items-center gap-1 text-[10.5px] text-[#9BA0B4] mt-1.5 truncate">
+          <p className="flex items-center gap-1 text-[10.5px] text-[#9BA0B4] mt-1 truncate">
             {doc.recv_dept_name && (
               <span className="flex items-center gap-1 min-w-0 truncate">
                 <InboxIcon />
@@ -252,12 +231,13 @@ export default function CoopCard({ doc, onClick, forceExpanded = false }) {
             )}
           </p>
         )}
-        <div className="flex items-center justify-between gap-2 mt-2.5">
-          <span className="text-[11.5px] text-[#6B7280]">
-            {doc.deadline ? `마감 ${doc.deadline}` : "기한 없음"}
-          </span>
-          <StatusBadge doc={doc} />
-        </div>
+        {/* 2026-09-07(13): "요 상태 값은 필요 없을듯" 요청 — 마감일 줄 오른쪽에
+            있던 StatusBadge(완료/제출 필요/캘린더 등록됨)를 없앰. 같은 정보가
+            바로 아래 AI Summary 라벨 줄의 action_type 배지("제출 필요" 등)로도
+            이미 나오고 있어서 중복이었음. */}
+        <p className="text-[11.5px] text-[#6B7280] mt-2">
+          {doc.deadline ? `마감 ${doc.deadline}` : "기한 없음"}
+        </p>
       </button>
       {/* 2026-08-22(9): "접으면 카드는 그대로고 빈 여백만 남는다" 버그 수정 —
           원인은 CoopPage.jsx 그리드의 기본 align-items: stretch + 카드가
@@ -309,7 +289,7 @@ export default function CoopCard({ doc, onClick, forceExpanded = false }) {
             높이가 살짝 달라지는 걸 감수하고, 고정 높이/overflow-hidden/truncate를
             전부 없애서 내용이 항상 끝까지 다 보이게 함. */}
         {expanded && (
-          <div className="px-3 py-2.5">
+          <div className="px-3 py-2">
             {/* 2026-09-05(6): "요약이 밑으로, 기한/조치가 위로" 요청 — 카드를
                 열자마자 "언제까지 뭘 해야 하는지"부터 보이게 순서를 뒤집음
                 (preview_order_swap.html에서 미리 봤던 순서). 구분선은 이제
@@ -329,8 +309,16 @@ export default function CoopCard({ doc, onClick, forceExpanded = false }) {
                 )}
               </div>
             )}
+            {/* 2026-09-07(11): "카드가 세로로 너무 길다" 요청 — 2026-09-05(3)에서
+                "조치가 잘린다"는 이유로 없앴던 줄 수 제한을, 이번엔 조치/기한이
+                아니라 AI 요약 문단에만 다시 걸었다(line-clamp-3). 조치/기한은
+                여전히 절대 안 잘림(위 블록). 요약이 길어서 잘리는 부분은 카드
+                위쪽(헤더 영역)을 눌러 상세 팝업에서 전체를 볼 수 있음.
+                2026-09-07(12): "원문 보기 없애줘" 요청 — 2026-09-07(5)에서
+                추가했던 "원문 보기 →" 링크(요약 박스 안, onClick=openDetail)를
+                다시 뺐다. 상세 팝업 자체는 카드 헤더 클릭으로 여전히 열림. */}
             <div
-              className={`text-[12px] leading-[1.5] whitespace-pre-line ${
+              className={`text-[12px] leading-[1.5] whitespace-pre-line line-clamp-3 ${
                 isRealAiSummary ? "text-[#3D57E8]" : "text-[#6B7280]"
               }`}
             >

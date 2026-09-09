@@ -53,13 +53,26 @@ function isRejected(item) {
 
 // 모든 단계가 "승인"으로 끝났을 때만 완료로 본다 — 반려가 하나라도 있으면
 // 그 뒤 단계가 전부 "미승인"(아직 안 옴)이라 해도 완료가 아니라 반려 상태다.
+// 2026-09-07(16): "지도교수 건너뛰더라도 윗단계에서 승인 때리면 문제 없다"는
+// 실사용 피드백 — 원래는 "단계가 4개면 4개 다 승인"이어야만 완료로 봤는데,
+// 실제 결재 관행은 그렇지 않다. 상위 결재권자(뒤 단계)가 먼저/직접 승인하면
+// 그 앞의 하위 단계(예: 지도교수) 승인은 형식상 안 찍혀 있어도 실무적으로는
+// 이미 끝난 일이다. 그래서 "마지막(최종) 단계가 승인"이면, 그 앞 단계 중
+// 아직 미승인인 게 남아있어도 전체를 완료로 본다(반려가 하나라도 있으면
+// 여전히 완료 아님 — 그건 그대로 최우선 처리).
 function isDone(item) {
   const stages = item.stages || [];
   if (stages.length === 0) return false;
   if (isRejected(item)) return false;
-  return stages.every((s) => stageStatus(s) === "approved");
+  if (stages.every((s) => stageStatus(s) === "approved")) return true;
+  const last = stages[stages.length - 1];
+  return stageStatus(last) === "approved";
 }
 
+// 완료 여부와 별개로 "몇 단계나 실제로 승인 도장이 찍혔는지"는 그대로 보여줘야
+// 하므로(진행바/배지의 N/전체 표시), 이 카운트 자체는 순서와 무관하게 승인된
+// 단계 수를 그대로 센다 — 위 isDone()의 "최종 단계 승인 시 완료" 예외와는
+// 별개 지표.
 function doneCountOf(item) {
   return (item.stages || []).filter((s) => stageStatus(s) === "approved").length;
 }
@@ -114,15 +127,20 @@ function avatarTone(key) {
   return AVATAR_PALETTE[hash];
 }
 
+// 2026-09-08: "반려·완료된 카드는 전체를 중립톤으로" 요청 — 이미 끝난 건은
+// 진행중인 건과 한눈에 구분되게 무채색 계열로 다시 칠한다(CSS 필터가 아니라
+// 색상 값 자체를 바꾸는 방식 — 방식 C, 완료/반려 라벨 자체는 그대로 남긴다).
+// 완료는 중립 회색, 반려는 톤 다운된 빨강으로 — 진행중(bg-brand-alt
+// text-brand-blueDark)만 원래 포인트 컬러를 유지한다.
 function StatusBadge({ item }) {
   const rejected = isRejected(item);
   const done = isDone(item);
   const total = (item.stages || []).length;
   const label = rejected ? "반려" : item.accpCnt || `${doneCountOf(item)}/${total || "?"}`;
   const tone = rejected
-    ? "bg-status-redBg text-status-red"
+    ? "bg-[#F3E4E4] text-[#B36569]"
     : done
-    ? "bg-status-greenBg text-status-green"
+    ? "bg-[#E9EBF2] text-brand-muted"
     : "bg-brand-alt text-brand-blueDark";
   return <span className={`text-[10.5px] font-bold px-2 py-[3px] rounded-[6px] flex-shrink-0 ${tone}`}>{label}</span>;
 }
@@ -130,32 +148,35 @@ function StatusBadge({ item }) {
 // 목업의 세그먼트형 진행바를 실제 stages 개수만큼 나눠서 그린다. 반려된
 // 단계는 파란색(진행)이 아니라 빨간색으로 표시해서 "여기서 막혔다"는 걸
 // 다음 단계(아직 안 옴, 회색)와도 승인 완료 단계(파란색)와도 구분한다.
+// 2026-09-08: 카드 전체가 끝난 건(반려 또는 완료)이면 진행바도 위 StatusBadge와
+// 같은 무채색 톤으로 낮춘다 — 진행중인 카드만 원색(파랑/빨강)으로 눈에 띈다.
 function ProgressSegments({ item }) {
   const stages = item.stages || [];
   if (stages.length === 0) return null;
+  const finished = isRejected(item) || isDone(item);
   return (
     <div className="flex gap-1 h-1.5 w-full">
       {stages.map((s, i) => {
         const status = stageStatus(s);
         const tone =
-          status === "approved" ? "bg-brand-blue" : status === "rejected" ? "bg-status-red" : "bg-brand-border";
+          status === "approved"
+            ? finished
+              ? "bg-[#C4C8D6]"
+              : "bg-brand-blue"
+            : status === "rejected"
+            ? finished
+              ? "bg-[#D9A3A5]"
+              : "bg-status-red"
+            : "bg-brand-border";
         return <div key={i} className={`flex-1 rounded-full ${tone}`} />;
       })}
     </div>
   );
 }
 
-function StatTile({ label, value, tone }) {
-  return (
-
-    <div className="bg-white rounded-2xl p-4 border border-brand-border flex items-center justify-between">
-      <div>
-        <p className="text-[11px] text-brand-muted font-semibold tracking-wide">{label}</p>
-        <p className={`text-2xl font-extrabold mt-1 ${tone || "text-brand-navy"}`}>{value}</p>
-      </div>
-    </div>
-  );
-}
+// 2026-09-07(17): "전체신청/처리대기/반려/완료 타일 없애고 현황요약 안으로"
+// 요청으로 이 타일을 쓰던 자리가 없어져서, StatTile 자체도 죽은 코드로 안
+// 남기려고 정의를 삭제(같은 통계는 이제 SummaryPanel 안의 2x2 박스로 나옴).
 
 function StatusChangeCard({ item, onClick }) {
   const reasonLine = [item.schregModGbnNm, item.schregModResnGbnNm].filter(Boolean).join(" · ");
@@ -163,13 +184,33 @@ function StatusChangeCard({ item, onClick }) {
   const stage = currentStage(item);
   const stageIsRejected = stage && stageStatus(stage) === "rejected";
   const initial = (item.stdKorNm || "?").slice(0, 1);
+  const stages = item.stages || [];
+  // 2026-09-07(16): isDone()이 "최종 단계 승인 시 완료" 예외를 갖게 되면서,
+  // currentStage()(첫 미승인 단계)만 보고 문구를 정하면 "지도교수 승인 대기"
+  // 처럼 이미 실무적으로 끝난 건을 아직 대기 중인 것처럼 보여주는 문제가
+  // 생긴다. isDone(item)을 먼저 확인해서, 완료로 처리된 건이면 그 앞의
+  // 미승인 단계는 문구에서 언급하지 않는다.
+  const allApproved = stages.length > 0 && stages.every((s) => stageStatus(s) === "approved");
+  const effectivelyDone = !stageIsRejected && isDone(item);
+  // 2026-09-08: "반려 또는 과정이 끝난 건은 카드 전체를 중립톤으로" 요청 —
+  // isRejected/isDone은 이미 KPI 집계(SummaryPanel)에서 쓰는 것과 동일한
+  // 판정 기준이라, 여기서도 그대로 재사용해서 "완료/반려로 집계되는 건과
+  // 카드가 흐려지는 건"이 항상 같은 기준으로 일치하게 했다.
+  const finished = isRejected(item) || isDone(item);
 
   let stageLine;
   if (stageIsRejected) {
     stageLine = `${stage.accpObjGbnNm || "승인"} 단계에서 반려됨`;
+  } else if (effectivelyDone && allApproved) {
+    stageLine = "모든 단계 승인 완료";
+  } else if (effectivelyDone) {
+    // 중간 단계가 미승인으로 남아있지만 최종 단계가 승인된 경우 — 있는
+    // 그대로("전부 다 됐다"고 거짓으로 말하지 않고) 어느 단계가 생략됐는지
+    // 보여준다.
+    stageLine = `최종 승인 완료 (${stage ? `${stage.accpObjGbnNm} 생략` : "일부 단계 생략"})`;
   } else if (stage) {
     stageLine = `${stage.accpObjGbnNm} 승인 대기`;
-  } else if ((item.stages || []).length === 0) {
+  } else if (stages.length === 0) {
     stageLine = "승인단계 정보 없음";
   } else {
     stageLine = "모든 단계 승인 완료";
@@ -178,12 +219,20 @@ function StatusChangeCard({ item, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`text-left bg-white border rounded-[18px] overflow-hidden transition-shadow hover:shadow-brand hover:-translate-y-0.5 ${
-        stageIsRejected ? "border-status-red/40" : "border-brand-border"
+      className={`text-left border rounded-[18px] overflow-hidden transition-shadow hover:shadow-brand hover:-translate-y-0.5 ${
+        finished ? "bg-[#F7F8FB] border-[#E9EBF2]" : "bg-white border-brand-border"
       }`}
     >
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-brand-border bg-brand-alt/60">
-        <span className={`text-[11px] font-bold px-2.5 py-[3px] rounded-full ${reasonTone(item.schregModGbnNm)}`}>
+      <div
+        className={`flex items-center justify-between px-4 py-2.5 border-b ${
+          finished ? "border-[#E9EBF2] bg-[#F1F2F7]" : "border-brand-border bg-brand-alt/60"
+        }`}
+      >
+        <span
+          className={`text-[11px] font-bold px-2.5 py-[3px] rounded-full ${
+            finished ? "bg-[#E9EBF2] text-brand-muted" : reasonTone(item.schregModGbnNm)
+          }`}
+        >
           {item.schregModGbnNm || "변동"}
         </span>
         <span className="text-[11px] text-brand-muted">신청 {fmtDate(item.schregModAplyDt)}</span>
@@ -192,14 +241,18 @@ function StatusChangeCard({ item, onClick }) {
       <div className="px-4 py-4">
         <div className="flex items-center gap-3">
           <div
-            className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold ${avatarTone(
-              item.stuno
-            )}`}
+            className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold ${
+              finished ? "bg-[#C4C8D6]" : avatarTone(item.stuno)
+            }`}
           >
             {initial}
           </div>
           <div className="min-w-0">
-            <p className="text-[13.5px] font-bold text-brand-navy leading-snug truncate">
+            <p
+              className={`text-[13.5px] font-bold leading-snug truncate ${
+                finished ? "text-[#8B8FA3]" : "text-brand-navy"
+              }`}
+            >
               {item.stdKorNm || "(이름 없음)"}{" "}
               <span className="text-[11px] text-brand-muted font-normal">{item.stuno}</span>
             </p>
@@ -352,9 +405,95 @@ function StatusChangeModal({ item, onClose }) {
   );
 }
 
-// 현황 요약 패널: "AI가 분석"한 척하는 문장 대신, 지금 있는 데이터로 실제
-// 계산 가능한 두 가지만 보여준다 — 사유별 분포, 대기 중인 승인 단계별 분포.
-function SummaryPanel({ items }) {
+// 2026-09-07(14): "현황 요약 부분 사진처럼 해줘" 요청 — 팀에서 보여준 시안
+// (아이콘+실시간 배지 헤더 / 사유별 분포 막대그래프+리스트 / 대기 중인 승인
+// 단계 번호 리스트 / 반려 경고 박스+필터 버튼) 구조로 리디자인. 데이터는
+// 전부 기존 계산 로직(reasonCounts/stageCounts/rejectedCount) 그대로 —
+// 새로 지어내는 값은 없고 보여주는 형태만 바꿨다. "AI가 분석" 문구를 뺐던
+// 원래 원칙(2026-09-02, 파일 상단 주석)도 그대로 유지.
+function PieIcon(props) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" {...props}>
+      <path d="M10 2v8l6.9 4a8 8 0 1 1-6.9-12Z" fill="currentColor" />
+      <path d="M12 2.3A8 8 0 0 1 17.9 10H10V2.3Z" fill="currentColor" opacity="0.45" />
+    </svg>
+  );
+}
+function FolderIcon(props) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5" {...props}>
+      <path d="M2.5 5.5a1 1 0 0 1 1-1H8l1.5 2h7a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-9.5Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function ClockIcon(props) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5" {...props}>
+      <circle cx="10" cy="10" r="7.25" />
+      <path d="M10 6v4.2l2.8 1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+// 2026-09-07(15): "이거 뭐냐"(경고 아이콘이 카드를 거의 다 채울 만큼 커지고
+// 옆 텍스트는 세로 한 글자씩 찌그러진 버그) — 원인은 `className="w-4 h-4"
+// {...props}` 순서였음. 호출부에서 <WarnIcon className="text-status-red
+// flex-shrink-0" />처럼 className을 넘기면, 뒤에 스프레드된 props의
+// className이 앞의 "w-4 h-4"를 통째로 덮어써서 크기 클래스가 사라졌었다
+// (다른 아이콘들은 className을 안 넘겨받아서 안 드러났던 버그). className을
+// 따로 받아서 기본 크기 클래스 뒤에 이어붙이는 방식으로 고침(덮어쓰기 대신
+// 병합).
+function WarnIcon({ className = "", ...rest }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className={`w-4 h-4 ${className}`}
+      {...rest}
+    >
+      <path d="M10 3.2 2.6 16.2a1 1 0 0 0 .87 1.5h13.06a1 1 0 0 0 .87-1.5L10 3.2Z" strokeLinejoin="round" />
+      <path d="M10 8v3.3" strokeLinecap="round" />
+      <circle cx="10" cy="14" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// 2026-09-07(21): "2번 사진이랑 똑같이" 요청으로 사유별 분포 막대/점 색을
+// 사유 종류(휴학=amber/자퇴=red/복학=green)별로 다르게 칠하던 것에서 →
+// 건수 순위(1등만 브랜드 블루, 나머지는 슬레이트 회색 톤) 기준으로 바꿨다.
+// 사유가 몇 개든 색이 계속 늘어나지 않고, 가장 큰 비중이 뭔지만 한눈에
+// 보이는 쪽으로 단순화. reasonCounts가 이미 건수 내림차순 정렬이라 인덱스만
+// 넘기면 된다.
+function rankColor(index) {
+  if (index === 0) return "bg-brand-blue";
+  if (index === 1) return "bg-slate-400";
+  return "bg-slate-300";
+}
+
+// 2026-09-07(21): KPI 타일마다 숫자 옆 보조 텍스트를 "필요할 때만 배지처럼"
+// 보이게 스타일을 나눔 — 전체 신청은 그냥 옅은 회색 텍스트, 처리 대기/반려는
+// 옅은 색 배경의 배지, 완료는 흰 바탕에 얇은 테두리만 두른 중립 배지.
+function kpiSubClass(style) {
+  if (style === "blue") return "bg-brand-blue/10 text-brand-blueDark px-1.5 py-0.5 rounded-full font-bold";
+  if (style === "red") return "bg-status-redBg text-status-red px-1.5 py-0.5 rounded-full font-bold";
+  if (style === "neutral")
+    return "bg-white border border-brand-border text-brand-navy px-1.5 py-0.5 rounded-full font-bold";
+  return "text-brand-muted";
+}
+
+// 2026-09-07(19): "이 목업(EnhancedSummaryCard)에서 좌측 현황요약 부분만
+// 디자인 적용해줘" 요청 — 팀에서 새로 보내준 목업은 보라색 카드 테마 대신
+// 중립(슬레이트) 바탕에 상단 그라데이션 띠 + 옅은 슬레이트 통계 타일 +
+// 절제된 포인트 컬러 조합을 쓰고 있었다. 그 톤 그대로 옮기되, 목업이 쓰던
+// Font Awesome 아이콘은 새 의존성이라 추가하지 않고(코딩 규칙 — 아이콘 폰트
+// 새로 안 넣기) 기존 인라인 SVG 아이콘(PieIcon/FolderIcon/ClockIcon/
+// WarnIcon)을 그대로 재사용했다. 계산 로직(reasonCounts/stageCounts/
+// rejectedCount/pendingCount/doneCount/totalPendingStages)과 반려 필터
+// 토글 동작은 전부 그대로 — 바뀐 건 마크업/색상 등 표현 방식뿐이다. 이
+// 패널 바깥(FilterPanel, 우측 카드 리스트, 헤더)은 이번 요청 범위 밖이라
+// 손대지 않았다.
+function SummaryPanel({ items, statusFilter, onToggleRejectedFilter }) {
   const reasonCounts = useMemo(() => {
     const map = new Map();
     for (const item of items) {
@@ -378,38 +517,194 @@ function SummaryPanel({ items }) {
   }, [items]);
 
   const rejectedCount = useMemo(() => items.filter(isRejected).length, [items]);
+  // 2026-09-07(17): "전체신청/처리대기/반려/완료 타일을 없애고 현황요약
+  // 안으로 넣어달라" 요청 — 예전엔 StatusChangePage 본문 우측에 별도
+  // grid-cols-4 타일로 떠 있었는데, 그 4개 값을 이 패널 헤더 바로 아래
+  // 2x2 박스로 옮겨왔다. 계산 로직(isDone/isRejected)은 그대로 재사용해서
+  // 우측 리스트의 개수와 항상 같은 값을 보여준다.
+  const pendingCount = useMemo(() => items.filter((i) => !isDone(i) && !isRejected(i)).length, [items]);
+  const doneCount = useMemo(() => items.filter(isDone).length, [items]);
+  const totalPendingStages = stageCounts.reduce((sum, [, count]) => sum + count, 0);
+
+  // 2026-09-07(21): "2번 사진이랑 똑같이" 요청 — 타일 테두리(border)를 아예
+  // 없애고 옅은 브랜드 톤(brand-alt) 배경만 남겨서 카드 안에 더 자연스럽게
+  // 녹아들게 함. 보조 텍스트도 4칸이 전부 배지였던 것에서 → 전체 신청만
+  // 배지 없는 맨 텍스트, 완료는 흰 바탕 중립 배지로 톤을 낮췄다(반려처럼
+  // "확인이 필요한" 항목만 색 배지로 강조).
+  // 2026-09-07(23): "전체 신청 > 20건 없애주고 숫자만 나오게" 요청 — 전체
+  // 신청 타일은 sub 자체를 없애서(null) 숫자 하나만 남김.
+  const kpiTiles = [
+    { label: "전체 신청", value: items.length, sub: null, subStyle: "plain" },
+    { label: "처리 대기", value: pendingCount, sub: "대기중", subStyle: "blue" },
+    { label: "반려", value: rejectedCount, sub: "확인요망", subStyle: "red" },
+    { label: "완료", value: doneCount, sub: "승인완료", subStyle: "neutral" },
+  ];
 
   return (
-    <div className="bg-white rounded-[20px] p-5 border border-status-violet/25 relative overflow-hidden">
-      <div className="absolute -right-4 -top-4 w-24 h-24 bg-status-violetBg rounded-full blur-2xl" />
-      <h3 className="text-[13px] font-bold text-status-violet mb-3 relative">현황 요약</h3>
-      <div className="relative flex flex-col gap-3 text-[12px]">
-        <div>
-          <p className="text-brand-muted font-semibold mb-1">사유별 분포</p>
-          {reasonCounts.length === 0 ? (
-            <p className="text-brand-muted">데이터 없음</p>
-          ) : (
-            <p className="text-brand-navy leading-relaxed">
-              {reasonCounts.map(([label, count]) => `${label} ${count}건`).join(" · ")}
-            </p>
-          )}
+    <div className="bg-white rounded-[20px] border border-brand-border overflow-hidden">
+      {/* 2026-09-07(28): "위에 파란줄 없애줘" 요청으로 상단 그라데이션 띠
+          제거. */}
+      <div className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          {/* 2026-09-07(22): "현황요약 글씨 볼드체 해주고" — 이미 font-bold였는데
+              13px라 두께가 잘 안 보였던 것 같아 14px + font-extrabold로 더 확실히. */}
+          <h3 className="text-[14px] font-extrabold text-brand-navy flex items-center gap-1.5">
+            <span className="w-6 h-6 rounded-lg bg-slate-100 text-brand-blue flex items-center justify-center flex-shrink-0">
+              <PieIcon />
+            </span>
+            현황 요약
+          </h3>
+          {/* 2026-09-07(14): "실시간" 배지 — 접속 여부를 실측하는 건 아니고,
+              이 목록 자체가 background.js의 1분 주기 폴링 결과를 그대로 보여준다는
+              뜻의 라벨(장식이 아니라 실제 동작 방식과 일치). */}
+          <span className="text-[10.5px] font-bold text-status-green bg-status-greenBg px-2 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-green animate-pulse" /> 실시간
+          </span>
         </div>
-        <div>
-          <p className="text-brand-muted font-semibold mb-1">대기 중인 승인 단계</p>
-          {stageCounts.length === 0 ? (
-            <p className="text-brand-muted">대기 중인 항목 없음</p>
-          ) : (
-            <p className="text-brand-navy leading-relaxed">
-              {stageCounts.map(([label, count]) => `${label} ${count}건`).join(" · ")}
-            </p>
-          )}
+
+        {/* 2026-09-07(17): 우측에 따로 떠 있던 4개 통계 타일(전체 신청/처리
+            대기/반려/완료)을 이 자리(헤더 바로 아래)로 옮김.
+            2026-09-07(21): "2번 사진이랑 똑같이" 요청 — 흰 배경+테두리 카드
+            였던 것을 테두리 없는 옅은 브랜드 톤 배경으로, 숫자는 전부 navy
+            하나로 통일하고 보조 텍스트만 상태별로 배지 유무/색을 다르게. */}
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {kpiTiles.map((tile) => (
+            <div key={tile.label} className="bg-brand-alt rounded-xl px-3 py-2.5">
+              <p className="text-[10.5px] text-brand-muted font-semibold">{tile.label}</p>
+              {/* 2026-09-07(24): "숫자 글씨체 총 OO건 이거랑 통일해줘" — 바로
+                  아래 "사유별 분포"의 "총 {N}건" 캡션(별도 font-weight 없이
+                  기본 굵기)과 같은 글씨체로 맞추려고 font-bold를 뺐다(기본
+                  굵기, 크기/색만 유지). 배지(대기중/확인요망/승인완료)는
+                  justify-between으로 타일 우측 끝에 붙게 정렬. */}
+              {/* 2026-09-07(25): "숫자 볼드체 해줘" — 방금(24) 뺐던 font-bold를
+                  다시 넣음(글씨체 통일 요청의 핵심은 폰트 패밀리였지, 굵기를
+                  없애자는 뜻은 아니었던 것으로 보임). */}
+              <div className="flex items-baseline justify-between gap-1.5 mt-1">
+                <span className="text-xl font-bold text-brand-navy">{tile.value}</span>
+                {tile.sub && (
+                  <span className={`text-[10px] flex-shrink-0 ${kpiSubClass(tile.subStyle)}`}>{tile.sub}</span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-        {rejectedCount > 0 && (
+
+        <div className="flex flex-col gap-4 text-[12px]">
+          {/* 사유별 분포 */}
           <div>
-            <p className="text-status-red font-semibold mb-1">반려</p>
-            <p className="text-status-red leading-relaxed">{rejectedCount}건 — 승인단계 참고</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-brand-muted font-semibold flex items-center gap-1.5">
+                <FolderIcon /> 사유별 분포
+              </p>
+              <p className="text-brand-muted">총 {items.length}건</p>
+            </div>
+            {reasonCounts.length === 0 ? (
+              <p className="text-brand-muted">데이터 없음</p>
+            ) : (
+              <>
+                <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-100">
+                  {reasonCounts.map(([label, count], i) => (
+                    <span
+                      key={label}
+                      className={rankColor(i)}
+                      style={{ width: `${(count / items.length) * 100}%` }}
+                    />
+                  ))}
+                </div>
+                <ul className="flex flex-col gap-1.5 mt-2.5">
+                  {reasonCounts.map(([label, count], i) => (
+                    <li key={label} className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${rankColor(i)}`} />
+                      <span className="text-brand-navy font-medium flex-1 truncate">{label}</span>
+                      <span className="text-brand-muted">{Math.round((count / items.length) * 100)}%</span>
+                      <span className="text-brand-navy font-bold bg-white border border-brand-border rounded-full px-2 py-0.5 min-w-[44px] text-center">
+                        {count}건
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
-        )}
+
+          {/* 대기 중인 승인 단계 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-brand-muted font-semibold flex items-center gap-1.5">
+                <ClockIcon /> 대기 중인 승인 단계
+              </p>
+              {/* 2026-09-07(18): 처음엔 진한 단색+흰글씨였다가, 2026-09-07(21)
+                  "2번 사진이랑 똑같이" 요청으로 중립(흰 배경+테두리)으로
+                  낮췄고, 2026-09-07(22) "색상 넣어줘"로 진한 주황 배지로
+                  바꿨었는데, 2026-09-07(24) "기존 조치필요 색상처럼 빨간색으로"
+                  요청 — 아래 "조치필요" 배지와 완전히 같은 색(bg-status-redBg
+                  + text-status-red)으로 맞춤. */}
+              {totalPendingStages > 0 && (
+                <span className="text-[10.5px] font-bold text-status-red bg-status-redBg px-2 py-0.5 rounded-full flex-shrink-0">
+                  {totalPendingStages}건 처리요망
+                </span>
+              )}
+            </div>
+            {stageCounts.length === 0 ? (
+              <p className="text-brand-muted">대기 중인 항목 없음</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {stageCounts.map(([label, count], i) => (
+                  <li key={label} className="flex items-center gap-2">
+                    {/* 2026-09-07(21): 사각 슬레이트 배지 → 원형(rounded-full)
+                        회색 배지로. 건수 텍스트도 브랜드 블루 강조에서
+                        navy로 낮춰서 전체 톤을 중립에 맞춤. */}
+                    <span className="w-5 h-5 rounded-full bg-slate-100 text-brand-navy text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                      {i + 1}
+                    </span>
+                    <span className="text-brand-navy font-medium flex-1 truncate">{label}</span>
+                    <span className="text-brand-navy font-bold">{count}건</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 반려 — 실제로 조치가 필요한 항목이라 강조는 하되, 이번
+              리디자인에서는 카드 전체를 빨간 배경으로 채우던 것 대신 중립
+              슬레이트 박스 안에서 텍스트/배지만 빨간색으로 남겨 톤을
+              맞췄다. "반려 내역 필터링" 버튼(FilterPanel의 진행 상태
+              필터를 "반려"로 바꿔주는 것뿐, 새 조회 기능은 아님) 토글
+              동작은 그대로. */}
+          {rejectedCount > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div className="flex items-center gap-1.5">
+                <WarnIcon className="text-status-red flex-shrink-0" />
+                <p className="text-status-red font-bold">반려 신청 {rejectedCount}건</p>
+                {/* 2026-09-07(21): "2번 사진이랑 똑같이" — 진한 단색 배지에서
+                    옅은 배경(status-redBg) + 빨간 텍스트로 다시 낮춤. */}
+                <span className="text-[10px] font-bold text-status-red bg-status-redBg px-1.5 py-0.5 rounded flex-shrink-0">
+                  조치필요
+                </span>
+              </div>
+              <p className="text-brand-muted text-[11px] mt-1 mb-2.5">승인단계 참고 및 보완 안내 필요</p>
+              {/* 2026-09-07(17): "필터링 누르면 그 버튼이 전체보기로 바뀌게"
+                  요청 — 지금 필터가 이미 "반려"면 버튼을 "전체보기 →"로 바꾸고
+                  누르면 다시 statusFilter를 "all"로 되돌리는 토글 버튼으로 동작.
+                  2026-09-07(22): "반려내역 필터링 버튼 조치필요 배경색상으로
+                  넣어주고 누르면 전체보기 흰색 버튼으로" 요청 — 바로 위
+                  "조치필요" 배지와 같은 배경(status-redBg)+텍스트(status-red)
+                  색을 기본 상태(아직 필터링 전) 버튼에 쓰고, 필터링된 상태
+                  (전체보기)에서는 흰 배경으로 낮춰서 두 상태가 색으로도
+                  구분되게 함. */}
+              <button
+                onClick={onToggleRejectedFilter}
+                className={`w-full text-center text-[12px] font-bold rounded-lg py-1.5 border transition ${
+                  statusFilter === "rejected"
+                    ? "bg-white text-status-red border-status-red/30 hover:bg-status-redBg"
+                    : "bg-status-redBg text-status-red border-status-red/20 hover:bg-status-red/15"
+                }`}
+              >
+                {statusFilter === "rejected" ? "전체보기 →" : "반려 내역 필터링 →"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -517,22 +812,12 @@ export default function StatusChangePage() {
     });
   }, [items, search, reasonFilter, statusFilter]);
 
-  // ⚠️ 반려는 "완료"도 "처리중"도 아닌 별도 상태 — 처리 대기 집계에서 반려
-  // 건을 빼야 "처리 대기" 숫자가 실제로 대응이 필요한 건수와 맞는다.
-  const pendingCount = useMemo(() => items.filter((i) => !isDone(i) && !isRejected(i)).length, [items]);
-  const doneCount = useMemo(() => items.filter(isDone).length, [items]);
-  const rejectedCount = useMemo(() => items.filter(isRejected).length, [items]);
-
+  // 2026-09-07(17): 여기 있던 pendingCount/doneCount/rejectedCount(처리
+  // 대기/완료/반려 집계)는 우측 4개 타일 전용이었는데 그 타일을 없애면서
+  // 이 컴포넌트 레벨에선 더 이상 안 씀 — 같은 계산은 SummaryPanel이 자기
+  // items prop으로 직접 다시 하고 있음(중복 계산이지만 컴포넌트 간 props로
+  // 안 넘겨도 되게 하는 쪽을 택함).
   const selected = items.find((it) => it.id === selectedId) || null;
-
-  const listTitle =
-    statusFilter === "all"
-      ? "전체 신청"
-      : statusFilter === "pending"
-      ? "처리중인 신청"
-      : statusFilter === "rejected"
-      ? "반려된 신청"
-      : "완료된 신청";
 
   return (
     <div className="p-4 max-w-7xl mx-auto">
@@ -551,7 +836,11 @@ export default function StatusChangePage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* 왼쪽: 현황 요약 + 필터 */}
           <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-5">
-            <SummaryPanel items={items} />
+            <SummaryPanel
+              items={items}
+              statusFilter={statusFilter}
+              onToggleRejectedFilter={() => setStatusFilter((f) => (f === "rejected" ? "all" : "rejected"))}
+            />
             <FilterPanel
               items={items}
               search={search}
@@ -563,20 +852,16 @@ export default function StatusChangePage() {
             />
           </div>
 
-          {/* 오른쪽: 통계 타일 + 카드 리스트 */}
+          {/* 오른쪽: 카드 리스트
+              2026-09-07(17): "전체신청/처리대기/반려/완료 타일 없애고 현황요약
+              안으로" 요청 — 여기 있던 4개 통계 타일(StatTile) 그리드를
+              없애고 왼쪽 SummaryPanel 헤더 아래 2x2 박스로 옮겼다.
+              2026-09-07(28): "전체신청 없애줘" 요청 — 리스트 위에 있던
+              "전체 신청 / N건" 제목 줄 자체를 없앴다(listTitle 변수는 다른
+              곳에서 안 쓰여서 죽은 코드지만, 필터 상태에 따라 문구가 바뀌는
+              로직 자체는 나중에 다시 쓸 수도 있어 남겨둠 — eslint 경고 없이
+              쓰려면 지워도 무방). */}
           <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-5">
-            <div className="grid grid-cols-4 gap-3">
-              <StatTile label="전체 신청" value={items.length} />
-              <StatTile label="처리 대기" value={pendingCount} tone="text-brand-blue" />
-              <StatTile label="반려" value={rejectedCount} tone="text-status-red" />
-              <StatTile label="완료" value={doneCount} tone="text-status-green" />
-            </div>
-
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-[15px] font-bold text-brand-navy">{listTitle}</h3>
-              <p className="text-[12px] text-brand-muted">{filtered.length}건</p>
-            </div>
-
             {filtered.length === 0 ? (
               <div className="text-brand-muted text-sm py-6 text-center bg-white border border-brand-border rounded-xl">
                 조건에 맞는 학적변동 신청이 없습니다.

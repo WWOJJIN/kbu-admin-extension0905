@@ -333,9 +333,18 @@ async function getStatusChange(id) {
   const db = await initDB();
   return db.get(STORE_STATUS_CHANGES, id);
 }
+async function getAllStatusChanges() {
+  const db = await initDB();
+  const all = await db.getAll(STORE_STATUS_CHANGES);
+  return all.sort((a, b) => (b.schregModAplyDt || "").localeCompare(a.schregModAplyDt || ""));
+}
 async function upsertStatusChange(item) {
   const db = await initDB();
   await db.put(STORE_STATUS_CHANGES, item);
+}
+async function deleteStatusChange(id) {
+  const db = await initDB();
+  await db.delete(STORE_STATUS_CHANGES, id);
 }
 async function getMeta(key) {
   const db = await initDB();
@@ -359,7 +368,6 @@ async function getDeptCodes() {
   return Array.isArray(list) ? list : [];
 }
 var DEFAULT_FEATURE_TOGGLES = {
-  briefing: true,
   coop: true,
   approval: true,
   calendar: true,
@@ -1049,6 +1057,7 @@ function fillParsedFallback(parsed, rawText) {
     requires_action: parsed?.requires_action ?? guessRequiresAction(rawText)
   };
 }
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // extension/background.js
 var POLL_ALARM_NAME = "coopDocPoll";
@@ -1360,6 +1369,48 @@ var STATUS_CHANGE_MENU_ID = "M104947";
 function statusChangeKey(row) {
   return `SREG-${row.stuno}-${row.schregModAplyDt}-${row.schregModGbn}`;
 }
+function stageStatus(stage) {
+  const v = stage?.accpGbnNm;
+  if (!v || v === "\uBBF8\uC2B9\uC778") return "pending";
+  if (v.includes("\uBC18\uB824")) return "rejected";
+  return "approved";
+}
+function stagesRejected(stages) {
+  return (stages || []).some((s) => stageStatus(s) === "rejected");
+}
+function stagesDone(stages) {
+  if (!stages || stages.length === 0) return false;
+  if (stagesRejected(stages)) return false;
+  if (stages.every((s) => stageStatus(s) === "approved")) return true;
+  return stageStatus(stages[stages.length - 1]) === "approved";
+}
+var STATUS_CHANGE_PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1e3;
+async function pruneOldStatusChanges() {
+  let all;
+  try {
+    all = await getAllStatusChanges();
+  } catch (err) {
+    console.warn("[background] \uD559\uC801\uBCC0\uB3D9 \uC624\uB798\uB41C \uD56D\uBAA9 \uC815\uB9AC \u2014 \uBAA9\uB85D \uC870\uD68C \uC2E4\uD328:", err);
+    return 0;
+  }
+  const now = Date.now();
+  let deleted = 0;
+  for (const item of all) {
+    if (!item.resolved_at) continue;
+    if (now - item.resolved_at >= STATUS_CHANGE_PRUNE_AFTER_MS) {
+      try {
+        await deleteStatusChange(item.id);
+        deleted++;
+      } catch (err) {
+        console.warn("[background] \uD559\uC801\uBCC0\uB3D9 \uD56D\uBAA9 \uC0AD\uC81C \uC2E4\uD328:", item.id, err);
+      }
+    }
+  }
+  if (deleted > 0) {
+    console.log(`[background] \uD559\uC801\uBCC0\uB3D9 \uC624\uB798\uB41C \uD56D\uBAA9 ${deleted}\uAC74 \uC815\uB9AC \uC644\uB8CC(\uBC18\uB824/\uCD5C\uC885\uC2B9\uC778 30\uC77C \uACBD\uACFC).`);
+  }
+  return deleted;
+}
 async function pollStatusChanges() {
   if (statusChangePollInProgress) {
     console.log("[background] \uD559\uC801\uBCC0\uB3D9 \uD3F4\uB9C1\uC774 \uC544\uC9C1 \uC9C4\uD589 \uC911 \u2014 \uC774\uBC88 \uC54C\uB78C\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4.");
@@ -1440,6 +1491,8 @@ async function pollStatusChangesInner() {
     } catch (err) {
       console.warn("[background] \uD559\uC801\uBCC0\uB3D9 \uC2B9\uC778\uB2E8\uACC4 \uC870\uD68C \uC2E4\uD328:", key, err);
     }
+    const resolvedNow = stagesRejected(stages) || stagesDone(stages);
+    const resolved_at = resolvedNow ? prev?.resolved_at || Date.now() : null;
     const doc = {
       id: key,
       stuno: row.stuno || "",
@@ -1457,7 +1510,8 @@ async function pollStatusChangesInner() {
       attachNm: row.attachNm || "",
       stages,
       schemaVersion: STATUS_SCHEMA_VERSION,
-      created_at: prev?.created_at || Date.now()
+      created_at: prev?.created_at || Date.now(),
+      resolved_at
     };
     if (prev && prev.stages) {
       for (const stage of stages) {
@@ -1491,6 +1545,11 @@ async function pollStatusChangesInner() {
   }
   if (isBaseline) {
     await setSyncBaselineDone("statusChange");
+  }
+  try {
+    await pruneOldStatusChanges();
+  } catch (err) {
+    console.warn("[background] \uD559\uC801\uBCC0\uB3D9 \uC624\uB798\uB41C \uD56D\uBAA9 \uC815\uB9AC \uC911 \uC624\uB958:", err);
   }
   return { total: listRows.length, processed: rows.length, newCount, changedCount };
 }
@@ -1650,6 +1709,84 @@ function notifyStatusChanged(item) {
     message: `${item.subject || "\uD611\uC870\uBB38"} \uC0C1\uD0DC\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`,
     priority: 1
   });
+}
+var ERP_BASE_URL = "https://kis.kbu.ac.kr/nx/index.html";
+var CONTENT_SCRIPT_RETRY_COUNT = 6;
+var CONTENT_SCRIPT_RETRY_DELAY_MS = 700;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "KBU_ASSISTANT_GOTO_ERP_DRAFT") return;
+  goToErpDraftScreen(message.payload).then(() => sendResponse({ ok: true })).catch((err) => {
+    console.error("[background] ERP \uC791\uC131\uD654\uBA74 \uC774\uB3D9/\uCC44\uC6C0 \uC2E4\uD328:", err);
+    sendResponse({ ok: false, error: String(err?.message || err) });
+  });
+  return true;
+});
+async function goToErpDraftScreen(payload) {
+  const tab = await findOrOpenErpTab();
+  await ensureTabActive(tab);
+  try {
+    await sendFillMessageWithRetry(tab.id, payload);
+  } catch (err) {
+    if (!isConnectionError(err)) throw err;
+    await reloadTabAndWait(tab.id);
+    await sendFillMessageWithRetry(tab.id, payload);
+  }
+}
+function isConnectionError(err) {
+  const msg = String(err?.message || err || "");
+  return /Could not establish connection|Receiving end does not exist/.test(msg);
+}
+function reloadTabAndWait(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.reload(tabId, {}, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  }).then(() => waitForTabComplete(tabId));
+}
+async function findOrOpenErpTab() {
+  const existing = await chrome.tabs.query({ url: "https://kis.kbu.ac.kr/*" });
+  if (existing.length > 0) return existing[0];
+  const created = await chrome.tabs.create({ url: ERP_BASE_URL });
+  await waitForTabComplete(created.id);
+  return created;
+}
+function waitForTabComplete(tabId) {
+  return new Promise((resolve) => {
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+async function ensureTabActive(tab) {
+  await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+}
+async function sendFillMessageWithRetry(tabId, payload, attempt = 0) {
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, {
+      type: "KBU_ASSISTANT_FILL_DRAFT",
+      payload
+    });
+    if (!res?.ok) throw new Error(res?.error || "content.js\uAC00 \uCC44\uC6B0\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+    return res;
+  } catch (err) {
+    if (attempt < CONTENT_SCRIPT_RETRY_COUNT) {
+      await sleep(CONTENT_SCRIPT_RETRY_DELAY_MS);
+      return sendFillMessageWithRetry(tabId, payload, attempt + 1);
+    }
+    throw err;
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 export {
   diffCoopDocList,

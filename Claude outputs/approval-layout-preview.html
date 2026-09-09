@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>결재현황 레이아웃 미리보기 v3</title>
+<style>
+  :root {
+    --navy: #1A1B2E;
+    --blue: #4F6EF7;
+    --blueDark: #3D57E8;
+    --muted: #6B7280;
+    --border: #E4E7F2;
+    --alt: #F5F7FF;
+    --red: #E5484D; --redBg: #FDEEEE;
+    --green: #1E9E6E; --greenBg: #EAF7F1;
+    --amber: #D9822B; --amberBg: #FDF3E7;
+    --violet: #7C5CFC; --violetBg: #F5F3FF;
+    --gray: #6B7280; --grayBg: #F1F3F9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #EFF1F8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    color: var(--navy);
+    padding: 24px;
+  }
+  .note {
+    max-width: 1180px;
+    margin: 0 auto 16px;
+    font-size: 12.5px;
+    color: var(--muted);
+    background: white;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .note b { color: var(--navy); }
+  .page { max-width: 1180px; margin: 0 auto; }
+  .head { margin-bottom: 16px; }
+  .head h1 { font-size: 18px; font-weight: 600; margin: 0 0 3px; color: var(--navy); }
+  .head p { font-size: 13px; color: var(--muted); margin: 0; }
+
+  .grid { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+
+  /* ===== 좌측: 현황 요약 (학적변동 SummaryPanel과 동일한 뼈대) ===== */
+  .panel { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 20px; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .panel-title { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 800; color: var(--navy); }
+  .panel-icon { width: 24px; height: 24px; border-radius: 8px; background: #F1F3F9; color: var(--blue); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .live { font-size: 10.5px; font-weight: 700; color: var(--green); background: var(--greenBg); padding: 2px 8px; border-radius: 999px; display: flex; align-items: center; gap: 4px; }
+  .live .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--green); }
+
+  .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .kpi-tile { background: var(--alt); border-radius: 12px; padding: 10px 12px; }
+  .kpi-label { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+  .kpi-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 4px; }
+  .kpi-value { font-size: 20px; font-weight: 700; color: var(--navy); }
+  .kpi-sub { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; flex-shrink: 0; }
+  .kpi-sub.amber { background: var(--amberBg); color: var(--amber); }
+  .kpi-sub.gray { background: var(--grayBg); color: var(--gray); }
+  .kpi-sub.red { background: var(--redBg); color: var(--red); }
+
+  .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .section-title .label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+  .recent-list { display: flex; flex-direction: column; }
+  .recent-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .recent-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .recent-badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; text-align: center; }
+  .recent-badge.amber { background: var(--amberBg); color: var(--amber); }
+  .recent-badge.gray { background: var(--grayBg); color: var(--gray); }
+  .recent-badge.red { background: var(--redBg); color: var(--red); }
+  .recent-title { font-size: 12px; font-weight: 600; color: var(--navy); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-time { font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+
+  /* ===== 우측: 툴바 + 카드 리스트 ===== */
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .tabs { display: flex; align-items: center; gap: 2px; background: var(--alt); border-radius: 8px; padding: 2px; }
+  .tabs span { font-size: 12.5px; font-weight: 600; padding: 5px 12px; border-radius: 6px; color: var(--muted); }
+  .tabs span.active { background: white; color: var(--blue); box-shadow: 0 1px 2px rgba(26,27,46,0.06); }
+  .search { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); width: 190px; }
+
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card { background: white; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+  .card-strip { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: rgba(245,247,255,0.6); border-bottom: 1px solid var(--border); }
+  .tag { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+  .tag.expense { background: var(--alt); color: var(--blueDark); }
+  .tag.internal { background: var(--violetBg); color: var(--violet); }
+  .card-strip .date { font-size: 11px; color: var(--muted); }
+  .card-body { padding: 14px 16px 16px; }
+  .card-dept { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .card-title { font-size: 13.5px; font-weight: 700; color: var(--navy); line-height: 1.45; margin-top: 4px; white-space: normal; overflow-wrap: break-word; }
+  .card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+  .card-footer .who { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; flex-shrink: 0; }
+  .status-badge.amber { background: var(--amberBg); color: var(--amber); }
+  .status-badge.gray { background: var(--grayBg); color: var(--gray); }
+  .status-badge.red { background: var(--redBg); color: var(--red); }
+</style>
+</head>
+<body>
+
+  <div class="note">
+    <b>레이아웃 미리보기 v3</b> — 학적변동 탭의 현황요약 카드(둥근 카드 + 실시간 배지 + KPI 2x2 타일 + 리스트 섹션)와 협조문/학적변동 카드의 뼈대(흰 배경, 얇은 테두리, 상단 태그 스트립, 안 잘리는 제목)를 그대로 가져와서 통일감을 맞췄습니다. 상태는 완료(회색)·반려(빨간색)·진행중(노란색) 3종입니다.
+  </div>
+
+  <div class="page">
+    <div class="head">
+      <h1>결재 현황</h1>
+      <p>ERP 연동 지출·출장 및 내부기안 결재 현황을 통합 관리합니다. (최근 30일 이내 건만 표시)</p>
+    </div>
+
+    <div class="grid">
+      <!-- 좌측: 현황 요약 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="panel-icon">📋</span>
+            결재 현황 요약
+          </div>
+          <span class="live"><span class="dot"></span>실시간</span>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-tile">
+            <div class="kpi-label">전체 건수</div>
+            <div class="kpi-row"><span class="kpi-value">24</span></div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-label">진행중</div>
+            <div class="kpi-row"><span class="kpi-value">7</span><span class="kpi-sub amber">진행중</span></div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-label">완료</div>
+            <div class="kpi-row"><span class="kpi-value">14</span><span class="kpi-sub gray">완료</span></div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-label">반려</div>
+            <div class="kpi-row"><span class="kpi-value">3</span><span class="kpi-sub red">반려</span></div>
+          </div>
+        </div>
+
+        <div class="section-title">
+          <span class="label">🕓 최근 상태 변경</span>
+        </div>
+        <div class="recent-list">
+          <div class="recent-item">
+            <span class="recent-badge gray">완료</span>
+            <span class="recent-title">방학 중 소프트웨어 실습실 사물함 수리 건</span>
+            <span class="recent-time">방금 전</span>
+          </div>
+          <div class="recent-item">
+            <span class="recent-badge red">반려</span>
+            <span class="recent-title">2026-2학기 산업체 현장실습 심의</span>
+            <span class="recent-time">15분 전</span>
+          </div>
+          <div class="recent-item">
+            <span class="recent-badge amber">진행중</span>
+            <span class="recent-title">교원 초과 시수 산출에 따른 협조 요청 건</span>
+            <span class="recent-time">1시간 전</span>
+          </div>
+          <div class="recent-item">
+            <span class="recent-badge amber">진행중</span>
+            <span class="recent-title">2026년도 신임교원 연구실 비품 구매 건</span>
+            <span class="recent-time">3시간 전</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 우측: 툴바 + 카드 -->
+      <div>
+        <div class="toolbar">
+          <div class="tabs">
+            <span class="active">전체</span>
+            <span>지출/출장</span>
+            <span>내부기안</span>
+          </div>
+          <input class="search" type="text" placeholder="문서명, 부서 검색" disabled />
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="card-strip">
+              <span class="tag expense">지출/출장</span>
+              <span class="date">2026-09-07 16:47</span>
+            </div>
+            <div class="card-body">
+              <div class="card-dept">소프트웨어융합과</div>
+              <div class="card-title">소프트웨어융합과_2026년도 과정평가형 지원금지출_9월분 행정업무지원 수당</div>
+              <div class="card-footer">
+                <span class="who">최근 처리자: 최이정</span>
+                <span class="status-badge amber">진행중</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-strip">
+              <span class="tag internal">내부기안</span>
+              <span class="date">2026-08-14 10:05</span>
+            </div>
+            <div class="card-body">
+              <div class="card-dept">빅데이터과 · 정유진</div>
+              <div class="card-title">[빅데이터과] 하계 졸업사정대장 제출 건 - 수정 재제출</div>
+              <div class="card-footer">
+                <span class="who">최종 승인권자: 교무처장(전결)</span>
+                <span class="status-badge gray">완료</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-strip">
+              <span class="tag internal">내부기안</span>
+              <span class="date">2026-09-07 11:20</span>
+            </div>
+            <div class="card-body">
+              <div class="card-dept">산학협력단</div>
+              <div class="card-title">2026-2학기 산업체 현장실습 심의</div>
+              <div class="card-footer">
+                <span class="who">최근 처리자: 박서준</span>
+                <span class="status-badge red">반려</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-strip">
+              <span class="tag expense">지출/출장</span>
+              <span class="date">2026-09-07 09:03</span>
+            </div>
+            <div class="card-body">
+              <div class="card-dept">교무행정팀</div>
+              <div class="card-title">2026년도 신임교원 연구실 비품 구매 건</div>
+              <div class="card-footer">
+                <span class="who">최근 처리자: -</span>
+                <span class="status-badge amber">진행중</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

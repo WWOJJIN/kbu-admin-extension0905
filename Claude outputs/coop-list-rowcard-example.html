@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>협조문 리스트 카드 예시</title>
+<style>
+  :root {
+    --navy: #1A1B2E;
+    --blue: #4F6EF7;
+    --blueDark: #3D57E8;
+    --muted: #6B7280;
+    --border: #E4E7F2;
+    --alt: #F5F7FF;
+    --amber: #D9822B;
+    --amberBg: #FDF3E7;
+    --green: #1E9E6E;
+    --greenBg: #EAF7F1;
+    --bg: #EEF1FB;
+    --card: #FFFFFF;
+    --shadow: 0 8px 24px rgba(26,27,46,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--navy);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.page-head { margin-bottom: 18px; }
+  header.page-head h1 { font-size: 20px; font-weight: 800; margin: 0 0 6px; }
+  header.page-head p { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.65; }
+  .panel-note {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 20px;
+    line-height: 1.65;
+  }
+  .panel-note b { color: var(--blueDark); }
+
+  .list { display: flex; flex-direction: column; gap: 12px; }
+
+  .row {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 12px 16px 13px;
+  }
+  .row.done { opacity: 0.72; }
+
+  .row-top {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 7px;
+  }
+  .chk {
+    width: 16px; height: 16px; flex-shrink: 0;
+    border: 1.5px solid #C7CCDE; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chk.checked { background: var(--green); border-color: var(--green); color: #fff; font-size: 10px; }
+  .star { font-size: 14px; color: #D8DCEC; flex-shrink: 0; }
+  .star.on { color: #F5B301; }
+  .badge-new { font-size: 10px; font-weight: 800; color: var(--blueDark); background: #EEF2FF; border-radius: 5px; padding: 2px 6px; flex-shrink: 0; }
+  .who { font-size: 12px; font-weight: 700; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who .rank { color: var(--muted); font-weight: 500; }
+  .spacer { flex: 1; min-width: 8px; }
+  .datetime { font-size: 11px; color: var(--muted); white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .status-pill .sdot { width: 5px; height: 5px; border-radius: 999px; flex-shrink: 0; }
+  .status-pill.action { background: var(--amberBg); color: var(--amber); }
+  .status-pill.action .sdot { background: var(--amber); }
+  .status-pill.done { background: var(--greenBg); color: var(--green); }
+  .status-pill.done .sdot { background: var(--green); }
+  .status-pill.registered { background: var(--alt); color: var(--blueDark); }
+  .status-pill.registered .sdot { background: var(--blue); }
+  .deadline { font-size: 11.5px; font-weight: 700; color: var(--navy); white-space: nowrap; flex-shrink: 0; }
+  .deadline .dday { color: var(--amber); }
+  .deadline .dday.overdue { color: var(--amber); }
+
+  .title {
+    font-size: 14.5px;
+    font-weight: 800;
+    color: var(--navy);
+    margin: 0 0 8px;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ai-box {
+    background: var(--alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 11px 9px;
+  }
+  .ai-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .ai-label { font-size: 10.5px; font-weight: 800; color: var(--blueDark); white-space: nowrap; flex-shrink: 0; }
+  .ai-summary {
+    font-size: 12px;
+    color: var(--blueDark);
+    line-height: 1.5;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ai-link { font-size: 11px; font-weight: 700; color: var(--blueDark); white-space: nowrap; flex-shrink: 0; text-decoration: none; }
+  .ai-link:hover { text-decoration: underline; }
+
+  .action-line { font-size: 11.5px; color: #4B5563; margin-top: 7px; }
+  .action-line b { color: var(--blueDark); font-weight: 700; }
+
+  @media (max-width: 560px) {
+    .datetime { display: none; }
+    .title { white-space: normal; }
+    .ai-summary { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <h1>협조문 리스트 카드 예시</h1>
+    <p>보내주신 시안 그대로(체크박스 · 즐겨찾기 별 · NEW · 접수일시 · 상태 · D-day 마감을 한 줄에, 그 아래 제목 → AI요약(원문 보기 포함) → 조치 순서) 지금 문서 5건에 적용해봤어요.</p>
+  </header>
+  <div class="panel-note">
+    체크박스 · 별(즐겨찾기) · 기안자 직급(예: "선임")은 지금 실제 데이터에는 없는 항목이에요(직급은 ERP에서 못 받아오고 있고, 체크박스/즐겨찾기는 아직 없는 기능). 시안 형태는 그대로 살리되, 직급 자리는 비워뒀고 체크박스/별은 시각 예시로만 넣었어요 — 실제로 넣을지는 말씀 주시면 그에 맞게 뺄지 기능을 만들지 정할게요.
+  </div>
+
+  <div class="list" id="list"></div>
+</div>
+
+<script>
+const DOCS = [
+  {
+    dept: "혁신지원사업단", drafter: "김양진", datetime: "2026-09-01 09:30",
+    title: "[협조] 2026학년도 대학혁신지원사업 연차평가 실적자료 제출 요청",
+    deadline: "09-30", dday: "D-14", overdue: false,
+    status: { type: "action", label: "제출 필요" },
+    done: false, isNew: true, starred: true, checked: false,
+    summary: "3차년도 핵심역량 지표 달성률 및 교원연구업적 데이터 취합 회신 (미제출 부서 명단 별도 공지 예정)",
+    action: "첨부 서식 작성 후 전자공문 회신"
+  },
+  {
+    dept: "복지지원팀", drafter: "김지민", datetime: "2026-08-28 14:05",
+    title: "2026학년도 2학기 교내 근로장학생 운영 안내",
+    deadline: "27-02-28", dday: "D-174", overdue: false,
+    status: { type: "action", label: "제출 필요" },
+    done: false, isNew: true, starred: false, checked: false,
+    summary: "2학기 근로장학 배정 기준과 시급, 선발 방법을 안내하며 해당 서류 제출을 요청합니다.",
+    action: "선발점수표 스캔본 이메일 제출 또는 포탈시스템 추천 학생 등록"
+  },
+  {
+    dept: "산학협력단", drafter: "박선영", datetime: "2026-09-03 11:20",
+    title: "3분기 산학협력 연구비 정산 및 증빙서류 제출 안내",
+    deadline: "09-18", dday: "D-11", overdue: false,
+    status: { type: "registered", label: "캘린더 등록됨" },
+    done: false, isNew: false, starred: true, checked: false,
+    summary: "3분기 산학협력 연구비 집행 내역을 정산하고, 지출 증빙서류를 회계시스템에 업로드해달라는 요청입니다.",
+    action: "회계시스템 증빙서류 업로드"
+  },
+  {
+    dept: "IT지원팀", drafter: "최우석", datetime: "2026-09-02 16:40",
+    title: "9월 정기 교내 네트워크 보안점검 사전 협조 요청",
+    deadline: "09-12", dday: "D-5", overdue: false,
+    status: { type: "action", label: "확인 필요" },
+    done: false, isNew: false, starred: false, checked: false,
+    summary: "정기 보안점검 일정 동안 일부 서비스 접속이 제한될 수 있으니 사전 공지 및 협조를 요청합니다.",
+    action: "부서 내 공지 후 이상 유무 회신"
+  },
+  {
+    dept: "총무팀", drafter: "이현수", datetime: "2026-08-30 10:00",
+    title: "학내 주차구역 임시 변경 및 우회 안내",
+    deadline: null, dday: null, overdue: false,
+    status: null,
+    done: true, isNew: false, starred: false, checked: true,
+    summary: "본관 앞 공사로 인해 9월 한 달간 주차구역이 임시 변경되니 안내드립니다.",
+    action: null
+  },
+];
+
+function statusPill(s) {
+  if (!s) return '';
+  const cls = s.type === 'action' ? 'action' : s.type === 'done' ? 'done' : 'registered';
+  return '<span class="status-pill ' + cls + '"><span class="sdot"></span>' + s.label + '</span>';
+}
+
+function row(d) {
+  return '<div class="row' + (d.done ? ' done' : '') + '">' +
+    '<div class="row-top">' +
+      '<span class="chk' + (d.checked ? ' checked' : '') + '">' + (d.checked ? '✓' : '') + '</span>' +
+      '<span class="star' + (d.starred ? ' on' : '') + '">' + (d.starred ? '★' : '☆') + '</span>' +
+      (d.isNew ? '<span class="badge-new">NEW</span>' : '') +
+      '<span class="who">' + d.dept + ' · ' + d.drafter + '</span>' +
+      '<span class="spacer"></span>' +
+      '<span class="datetime">' + d.datetime + '</span>' +
+      statusPill(d.status) +
+      (d.deadline ? '<span class="deadline">기한: ' + d.deadline + ' <span class="dday">(' + d.dday + ')</span></span>' : d.done ? '' : '<span class="deadline" style="color:#9BA0B4;font-weight:600">기한 없음</span>') +
+    '</div>' +
+    '<p class="title">' + d.title + '</p>' +
+    '<div class="ai-box">' +
+      '<div class="ai-row">' +
+        '<span class="ai-label">✨ AI 요약</span>' +
+        '<span class="ai-summary">' + d.summary + '</span>' +
+        '<a class="ai-link" href="#">원문 보기 →</a>' +
+      '</div>' +
+    '</div>' +
+    (d.action ? '<div class="action-line"><b>조치</b> ' + d.action + '</div>' : '') +
+  '</div>';
+}
+
+document.getElementById('list').innerHTML = DOCS.map(row).join('');
+</script>
+</body>
+</html>

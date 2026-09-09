@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>협조문 리스트 레이아웃 비교</title>
+<style>
+  :root {
+    --navy: #1A1B2E;
+    --blue: #4F6EF7;
+    --blueDark: #3D57E8;
+    --muted: #6B7280;
+    --border: #E4E7F2;
+    --alt: #F5F7FF;
+    --amber: #D9822B;
+    --amberBg: #FDF3E7;
+    --green: #1E9E6E;
+    --greenBg: #EAF7F1;
+    --bg: #EEF1FB;
+    --card: #FFFFFF;
+    --shadow: 0 8px 24px rgba(26,27,46,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--navy);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.page-head { margin-bottom: 22px; }
+  header.page-head h1 { font-size: 20px; font-weight: 800; margin: 0 0 6px; }
+  header.page-head p { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.6; }
+
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin: 20px 0 22px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .tab-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-family: inherit;
+  }
+  .tab-btn:hover { color: var(--navy); background: rgba(79,110,247,0.06); }
+  .tab-btn.active { color: var(--blueDark); border-bottom: 2px solid var(--blue); background: #fff; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel-note {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .badge.new { background: #EEF2FF; color: var(--blueDark); }
+  .badge.action { background: var(--amberBg); color: var(--amber); }
+  .badge.done { background: var(--greenBg); color: var(--green); }
+
+  /* ---------- A: 컴팩트 한 줄형 ---------- */
+  .list-a { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .row-a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #F1F2F8;
+    cursor: pointer;
+  }
+  .row-a:last-child { border-bottom: none; }
+  .row-a:hover { background: var(--alt); }
+  .row-a .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--blue); flex-shrink: 0; }
+  .row-a .dot.gray { background: #CBD1E6; }
+  .row-a .main { min-width: 0; flex: 1; }
+  .row-a .title { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-a .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .row-a .right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .row-a .deadline { font-size: 11px; color: var(--amber); font-weight: 600; white-space: nowrap; }
+
+  /* ---------- B: 표(테이블)형 ---------- */
+  table.list-b { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); font-size: 12.5px; }
+  table.list-b thead th {
+    text-align: left;
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 700;
+    background: var(--alt);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.list-b tbody td { padding: 11px 14px; border-bottom: 1px solid #F1F2F8; vertical-align: top; }
+  table.list-b tbody tr:last-child td { border-bottom: none; }
+  table.list-b tbody tr:hover { background: var(--alt); }
+  table.list-b .t-title { font-weight: 700; }
+  table.list-b .t-dept { color: var(--muted); white-space: nowrap; }
+  table.list-b .t-date { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.list-b .t-deadline { color: var(--amber); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ---------- C: 타임라인형 ---------- */
+  .list-c { position: relative; padding-left: 22px; }
+  .list-c::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: var(--border); }
+  .tl-item { position: relative; margin-bottom: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+  .tl-item::before { content: ""; position: absolute; left: -21px; top: 16px; width: 9px; height: 9px; border-radius: 999px; background: var(--blue); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--blue); }
+  .tl-item .tl-date { font-size: 10.5px; color: var(--blueDark); font-weight: 700; margin-bottom: 3px; }
+  .tl-item .tl-title { font-size: 13.5px; font-weight: 700; margin-bottom: 3px; }
+  .tl-item .tl-meta { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .tl-item .tl-summary { font-size: 11.5px; color: var(--blueDark); background: var(--alt); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; line-height: 1.5; }
+
+  /* ---------- D: 아코디언형 ---------- */
+  .list-d { display: flex; flex-direction: column; gap: 8px; }
+  .acc-item { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .acc-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; }
+  .acc-head .chev { font-size: 11px; color: var(--muted); transition: transform 0.15s; flex-shrink: 0; }
+  .acc-item.open .chev { transform: rotate(90deg); }
+  .acc-head .main { min-width: 0; flex: 1; }
+  .acc-head .title { font-size: 13.5px; font-weight: 700; }
+  .acc-head .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .acc-body { display: none; padding: 0 14px 14px 34px; }
+  .acc-item.open .acc-body { display: block; }
+  .acc-body .summary-box { font-size: 11.5px; color: var(--blueDark); background: var(--alt); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; line-height: 1.55; }
+  .acc-body .meta-line { font-size: 11px; color: #4B5563; margin-bottom: 4px; }
+  .acc-body .meta-line b { color: var(--blueDark); }
+
+  /* ---------- E: 2단(목록+미리보기) ---------- */
+  .split-e { display: grid; grid-template-columns: 300px 1fr; gap: 0; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; min-height: 360px; }
+  .split-e .side { border-right: 1px solid var(--border); }
+  .split-e .side-item { padding: 12px 14px; border-bottom: 1px solid #F1F2F8; cursor: pointer; }
+  .split-e .side-item:last-child { border-bottom: none; }
+  .split-e .side-item .title { font-size: 12.5px; font-weight: 700; line-height: 1.4; margin-bottom: 4px; }
+  .split-e .side-item .meta { font-size: 10.5px; color: var(--muted); }
+  .split-e .side-item.active { background: var(--alt); box-shadow: inset 3px 0 0 var(--blue); }
+  .split-e .side-item:hover:not(.active) { background: #FAFBFF; }
+  .split-e .preview { padding: 20px 24px; }
+  .split-e .preview .p-title { font-size: 16px; font-weight: 800; margin-bottom: 8px; line-height: 1.4; }
+  .split-e .preview .p-meta { font-size: 11.5px; color: var(--muted); margin-bottom: 14px; }
+  .split-e .preview .p-summary-label { font-size: 10.5px; font-weight: 700; color: var(--blueDark); margin-bottom: 6px; }
+  .split-e .preview .p-summary { font-size: 12.5px; color: var(--blueDark); background: var(--alt); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; line-height: 1.6; }
+  .split-e .preview .p-fields { font-size: 11.5px; color: #4B5563; margin-bottom: 10px; }
+  .split-e .preview .p-fields b { color: var(--blueDark); }
+
+  @media (max-width: 720px) {
+    .split-e { grid-template-columns: 1fr; }
+    .split-e .side { border-right: none; border-bottom: 1px solid var(--border); }
+    table.list-b { display: block; overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <h1>협조문 리스트 레이아웃 비교 (5안)</h1>
+    <p>지금 카드형(2열 그리드)이 한눈에 안 들어온다는 피드백에 맞춰, 카드 대신 "리스트형"으로 훑어볼 수 있는 배치 5가지를 같은 예시 데이터로 비교해봤어요. 위 탭을 눌러 넘겨보세요 — 실제로 적용할 안이 정해지면 그 구조로 CoopPage.jsx를 다시 짤게요.</p>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+  <div id="panels"></div>
+</div>
+
+<script>
+// 실제 협조문 카드에서 쓰는 필드 그대로(발신부서/기안자/제목/수신부서/접수일/
+// 마감/AI요약/조치유형/뱃지)를 이용한 예시 5건 — 앞의 2건은 지금 화면에 실제로
+//떠 있는 문서 내용을 그대로 가져왔고, 나머지 3건은 같은 톤으로 만든 예시.
+const DOCS = [
+  {
+    dept: "혁신지원사업단", drafter: "김양진",
+    title: "[혁신] 2026학년도 2분기 혁신지원사업 모니터링 및 실무자 성과평가를 위한 실적 입력 협조 요청",
+    recv: "AI디지털트윈연구원", date: "2026-09-01", deadline: "2026-09-30",
+    badge: "new", status: "완료", action: null,
+    summary: "2026학년도 2분기 성과평가를 위해 행정부서가 정량지표 달성현황과 실적 증빙자료를 기한 내 시스템에 입력해야 한다는 안내입니다."
+  },
+  {
+    dept: "복지지원팀", drafter: "김지민",
+    title: "2026학년도 2학기 교내 근로장학생 운영 안내",
+    recv: "AI디지털트윈연구원", date: "2026-08-28", deadline: "2027-02-28",
+    badge: "new", status: null, action: "제출",
+    summary: "2학기 근로장학 배정 기준과 시급, 선발 방법을 안내하며 해당 서류 제출을 요청합니다."
+  },
+  {
+    dept: "산학협력단", drafter: "박선영",
+    title: "3분기 산학협력 연구비 정산 및 증빙서류 제출 안내",
+    recv: "AI디지털트윈연구원", date: "2026-09-03", deadline: "2026-09-18",
+    badge: null, status: null, action: "제출",
+    summary: "3분기 산학협력 연구비 집행 내역을 정산하고, 지출 증빙서류를 회계시스템에 업로드해달라는 요청입니다."
+  },
+  {
+    dept: "IT지원팀", drafter: "최우석",
+    title: "9월 정기 교내 네트워크 보안점검 사전 협조 요청",
+    recv: "전체 부서", date: "2026-09-02", deadline: "2026-09-12",
+    badge: null, status: null, action: "확인",
+    summary: "정기 보안점검 일정 동안 일부 서비스 접속이 제한될 수 있으니 사전 공지 및 협조를 요청합니다."
+  },
+  {
+    dept: "총무팀", drafter: "이현수",
+    title: "학내 주차구역 임시 변경 및 우회 안내",
+    recv: "전체 부서", date: "2026-08-30", deadline: null,
+    badge: null, status: null, action: null,
+    summary: "본관 앞 공사로 인해 9월 한 달간 주차구역이 임시 변경되니 안내드립니다."
+  },
+];
+
+function badgeHtml(doc) {
+  if (doc.badge === "new") return '<span class="badge new">NEW</span>';
+  if (doc.status === "완료") return '<span class="badge done">완료</span>';
+  if (doc.action) return '<span class="badge action">' + doc.action + ' 필요</span>';
+  return "";
+}
+
+function esc(s) { return s; }
+
+// ---------- A ----------
+function renderA() {
+  return '<div class="panel-note">한 줄에 상태 점 · 제목 · 부서 · 마감만 압축해서 보여주고, 클릭하면 지금처럼 상세 팝업이 뜨는 방식이에요. 가장 많은 건수를 스크롤 없이 훑을 수 있어요.</div>' +
+    '<div class="list-a">' + DOCS.map(d => (
+      '<div class="row-a">' +
+        '<span class="dot' + (d.status === "완료" ? " gray" : "") + '"></span>' +
+        '<div class="main">' +
+          '<div class="title">' + esc(d.title) + '</div>' +
+          '<div class="meta">' + esc(d.dept) + ' · ' + esc(d.drafter) + ' · ' + esc(d.date) + '</div>' +
+        '</div>' +
+        '<div class="right">' +
+          (d.deadline ? '<span class="deadline">마감 ' + d.deadline + '</span>' : '<span class="deadline" style="color:#9BA0B4">기한 없음</span>') +
+          badgeHtml(d) +
+        '</div>' +
+      '</div>'
+    )).join('') + '</div>';
+}
+
+// ---------- B ----------
+function renderB() {
+  return '<div class="panel-note">엑셀/공문대장처럼 열을 맞춘 표 형식이에요. 부서·날짜별로 훑어보기 편하지만, AI 요약은 이 표 안에는 안 넣었어요(칸이 너무 길어져서) — 행 클릭 시 상세 팝업에서 확인하는 걸 전제로 했어요.</div>' +
+    '<table class="list-b"><thead><tr>' +
+      '<th style="width:70px">상태</th><th>제목</th><th style="width:120px">발신부서</th><th style="width:90px">접수일</th><th style="width:90px">마감일</th>' +
+    '</tr></thead><tbody>' +
+    DOCS.map(d => (
+      '<tr>' +
+        '<td>' + (badgeHtml(d) || '<span style="color:#CBD1E6;font-size:11px">–</span>') + '</td>' +
+        '<td class="t-title">' + esc(d.title) + '</td>' +
+        '<td class="t-dept">' + esc(d.dept) + '</td>' +
+        '<td class="t-date">' + esc(d.date) + '</td>' +
+        '<td class="t-deadline">' + (d.deadline || '–') + '</td>' +
+      '</tr>'
+    )).join('') + '</tbody></table>';
+}
+
+// ---------- C ----------
+function renderC() {
+  return '<div class="panel-note">접수일 기준으로 세로 타임라인을 따라 흐르는 방식이에요. AI 요약을 항상 펼쳐서 보여주면서도, 카드 그리드보다 세로로 자연스럽게 읽혀요.</div>' +
+    '<div class="list-c">' + DOCS.map(d => (
+      '<div class="tl-item">' +
+        '<div class="tl-date">' + d.date + (d.deadline ? ' · 마감 ' + d.deadline : '') + '</div>' +
+        '<div class="tl-title">' + esc(d.title) + ' ' + badgeHtml(d) + '</div>' +
+        '<div class="tl-meta">' + esc(d.dept) + ' · ' + esc(d.drafter) + ' · 수신 ' + esc(d.recv) + '</div>' +
+        '<div class="tl-summary">✨ ' + esc(d.summary) + '</div>' +
+      '</div>'
+    )).join('') + '</div>';
+}
+
+// ---------- D ----------
+function renderD() {
+  return '<div class="panel-note">평소엔 한 줄(제목+부서+뱃지)만 보이다가, 클릭하면 그 밑으로 기한/조치/AI요약이 펼쳐지는 방식이에요. 지금 카드가 가진 정보량은 그대로 유지하면서 목록은 압축해서 보여줘요.</div>' +
+    '<div class="list-d">' + DOCS.map((d, i) => (
+      '<div class="acc-item' + (i === 0 ? ' open' : '') + '" onclick="toggleAcc(this, event)">' +
+        '<div class="acc-head">' +
+          '<span class="chev">▶</span>' +
+          '<div class="main">' +
+            '<div class="title">' + esc(d.title) + '</div>' +
+            '<div class="meta">' + esc(d.dept) + ' · ' + esc(d.drafter) + ' · ' + esc(d.date) + '</div>' +
+          '</div>' +
+          badgeHtml(d) +
+        '</div>' +
+        '<div class="acc-body">' +
+          (d.deadline ? '<div class="meta-line"><b>기한</b> ' + d.deadline + '</div>' : '') +
+          (d.action ? '<div class="meta-line"><b>조치</b> ' + d.action + ' 필요</div>' : '') +
+          '<div class="summary-box">✨ AI Summary&nbsp;&nbsp;' + esc(d.summary) + '</div>' +
+        '</div>' +
+      '</div>'
+    )).join('') + '</div>';
+}
+function toggleAcc(el, ev) {
+  ev.stopPropagation();
+  document.querySelectorAll('.acc-item').forEach(x => { if (x !== el) x.classList.remove('open'); });
+  el.classList.toggle('open');
+}
+
+// ---------- E ----------
+let selectedE = 0;
+function renderE() {
+  const d = DOCS[selectedE];
+  return '<div class="panel-note">메일함처럼 왼쪽엔 제목만 쭉 나열하고, 오른쪽 큰 패널에 선택한 문서의 전체 내용(AI요약 포함)을 보여주는 방식이에요. 왼쪽에서 스캔하고 오른쪽에서 자세히 읽는 걸 분리한 구성이에요.</div>' +
+    '<div class="split-e">' +
+      '<div class="side">' + DOCS.map((doc, i) => (
+        '<div class="side-item' + (i === selectedE ? ' active' : '') + '" onclick="selectE(' + i + ')">' +
+          '<div class="title">' + esc(doc.title) + '</div>' +
+          '<div class="meta">' + esc(doc.dept) + ' · ' + esc(doc.date) + '</div>' +
+        '</div>'
+      )).join('') + '</div>' +
+      '<div class="preview">' +
+        '<div class="p-title">' + esc(d.title) + ' ' + badgeHtml(d) + '</div>' +
+        '<div class="p-meta">' + esc(d.dept) + ' · ' + esc(d.drafter) + ' &nbsp;|&nbsp; 수신 ' + esc(d.recv) + ' &nbsp;|&nbsp; 접수 ' + esc(d.date) + '</div>' +
+        '<div class="p-fields">' +
+          (d.deadline ? '<b>기한</b> ' + d.deadline + '<br/>' : '<b>기한</b> 없음<br/>') +
+          (d.action ? '<b>조치</b> ' + d.action + ' 필요' : '') +
+        '</div>' +
+        '<div class="p-summary-label">✨ AI Summary</div>' +
+        '<div class="p-summary">' + esc(d.summary) + '</div>' +
+      '</div>' +
+    '</div>';
+}
+function selectE(i) { selectedE = i; document.getElementById('panels').innerHTML = buildAllPanels(); showTab(current); }
+
+const TABS = [
+  { key: 'a', label: 'A. 컴팩트 한 줄형', render: renderA },
+  { key: 'b', label: 'B. 표(테이블)형', render: renderB },
+  { key: 'c', label: 'C. 타임라인형', render: renderC },
+  { key: 'd', label: 'D. 아코디언형', render: renderD },
+  { key: 'e', label: 'E. 목록+미리보기 2단', render: renderE },
+];
+let current = 'a';
+
+function buildAllPanels() {
+  return TABS.map(t => '<div class="panel' + (t.key === current ? ' active' : '') + '" id="panel-' + t.key + '">' + t.render() + '</div>').join('');
+}
+
+function showTab(key) {
+  current = key;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.key === key));
+  document.getElementById('panels').innerHTML = buildAllPanels();
+}
+
+document.getElementById('tabs').innerHTML = TABS.map(t =>
+  '<button class="tab-btn' + (t.key === current ? ' active' : '') + '" data-key="' + t.key + '" onclick="showTab(\'' + t.key + '\')">' + t.label + '</button>'
+).join('');
+document.getElementById('panels').innerHTML = buildAllPanels();
+</script>
+</body>
+</html>

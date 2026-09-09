@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>완료·반려 카드 처리 미리보기</title>
+<style>
+  :root {
+    --navy: #1A1B2E; --blue: #4F6EF7; --blueDark: #3D57E8;
+    --muted: #6B7280; --border: #E4E7F2; --alt: #F5F7FF;
+    --red: #E5484D; --redBg: #FDEEEE;
+    --green: #1E9E6E; --greenBg: #EAF7F1;
+    --amber: #D9822B; --amberBg: #FDF3E7;
+    --violet: #7C5CFC; --violetBg: #F5F3FF;
+    --gray: #6B7280; --grayBg: #F1F3F9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #EFF1F8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    color: var(--navy); padding: 24px;
+  }
+  .note {
+    max-width: 1080px; margin: 0 auto 20px; font-size: 12.5px; color: var(--muted);
+    background: white; border: 1px dashed var(--border); border-radius: 10px; padding: 10px 14px;
+  }
+  .note b { color: var(--navy); }
+  .page { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
+
+  .opt-block { background: white; border-radius: 16px; padding: 18px 20px; }
+  .opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .opt-head .badge { font-size: 10.5px; font-weight: 700; color: var(--blueDark); background: var(--alt); padding: 2px 8px; border-radius: 999px; }
+  .opt-head h2 { font-size: 14.5px; font-weight: 700; margin: 0; }
+  .opt-desc { font-size: 12px; color: var(--muted); margin: 2px 0 14px; }
+
+  .row-label { font-size: 11.5px; font-weight: 700; color: var(--muted); margin: 14px 0 8px; }
+  .row-label:first-of-type { margin-top: 0; }
+  .cards-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+  /* ===== 학적변동 카드 ===== */
+  .sc-card { background: white; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; transition: opacity .15s, filter .15s; }
+  .sc-strip { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: rgba(245,247,255,0.6); }
+  .sc-tag { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--alt); color: var(--blueDark); }
+  .sc-strip .date { font-size: 10.5px; color: var(--muted); }
+  .sc-body { padding: 12px 14px 14px; }
+  .sc-person { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 34px; height: 34px; border-radius: 999px; background: var(--blue); color: white; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .sc-name { font-size: 12.5px; font-weight: 700; color: var(--navy); }
+  .sc-name span { font-size: 10.5px; color: var(--muted); font-weight: 400; }
+  .sc-dept { font-size: 10.5px; color: var(--muted); }
+  .sc-reason { font-size: 10.5px; color: var(--muted); margin: 8px 0; }
+  .sc-stage-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+  .sc-stage-text { font-size: 10.5px; color: var(--muted); }
+  .sc-stage-text.rejected { color: var(--red); font-weight: 600; }
+  .sc-status-pill { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .sc-status-pill.progress { background: var(--amberBg); color: var(--amber); }
+  .sc-status-pill.done { background: var(--greenBg); color: var(--green); }
+  .sc-status-pill.rejected { background: var(--redBg); color: var(--red); }
+  .segs { display: flex; gap: 2px; height: 5px; }
+  .segs span { flex: 1; border-radius: 3px; background: #E9ECF4; }
+  .segs span.on { background: var(--green); }
+  .segs span.off-rej { background: var(--red); }
+
+  /* ===== 결재현황 카드 ===== */
+  .ap-card { background: white; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; transition: opacity .15s, filter .15s; }
+  .ap-strip { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: rgba(245,247,255,0.6); }
+  .ap-tag { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .ap-tag.expense { background: var(--alt); color: var(--blueDark); }
+  .ap-tag.internal { background: var(--violetBg); color: var(--violet); }
+  .ap-strip .date { font-size: 10.5px; color: var(--muted); }
+  .ap-body { padding: 12px 14px 14px; }
+  .ap-dept { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+  .ap-title { font-size: 12.5px; font-weight: 700; color: var(--navy); line-height: 1.4; margin-top: 3px; }
+  .ap-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .ap-who { font-size: 10.5px; color: var(--muted); }
+  .ap-status { font-size: 10px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .ap-status.progress { background: var(--amberBg); color: var(--amber); }
+  .ap-status.done { background: var(--grayBg); color: var(--gray); }
+  .ap-status.rejected { background: var(--redBg); color: var(--red); }
+
+  /* ===== 처리 방식 A: 투명도(opacity)만 낮춤 ===== */
+  .treat-opacity.is-finished { opacity: 0.5; }
+
+  /* ===== 처리 방식 B: 회색조(grayscale) 필터 ===== */
+  .treat-grayscale.is-finished { filter: grayscale(0.9); opacity: 0.75; }
+
+  /* ===== 처리 방식 C: 배경/배지를 중립톤으로 새로 칠함(필터 아님) ===== */
+  .treat-neutral.is-finished {
+    background: #F7F8FB;
+    border-color: #E9EBF2;
+  }
+  .treat-neutral.is-finished .sc-strip,
+  .treat-neutral.is-finished .ap-strip { background: #F1F2F7; }
+  .treat-neutral.is-finished .sc-tag,
+  .treat-neutral.is-finished .ap-tag { background: #E9EBF2; color: var(--muted); }
+  .treat-neutral.is-finished .sc-name,
+  .treat-neutral.is-finished .ap-title { color: #8B8FA3; }
+  .treat-neutral.is-finished .avatar { background: #C4C8D6; }
+  .treat-neutral.is-finished .segs span.on { background: #C4C8D6; }
+  .treat-neutral.is-finished .segs span.off-rej { background: #D9A3A5; }
+  .treat-neutral.is-finished .sc-status-pill.done,
+  .treat-neutral.is-finished .ap-status.done { background: #E9EBF2; color: var(--muted); }
+  .treat-neutral.is-finished .sc-status-pill.rejected,
+  .treat-neutral.is-finished .ap-status.rejected { background: #F3E4E4; color: #B36569; }
+</style>
+</head>
+<body>
+
+  <div class="note">
+    <b>미리보기</b> — 반려·완료(과정이 끝난) 카드를 죽이는 처리 방식 3가지를 비교용으로 나란히 놨습니다. 각 방식 안에서 진행중(원래대로) / 완료 / 반려 카드가 어떻게 보이는지 학적변동·결재현황 둘 다로 확인하실 수 있어요. 하나 골라주시면 그걸로 실제 코드에 반영할게요.
+  </div>
+
+  <div class="page">
+
+    <!-- 방식 A -->
+    <div class="opt-block">
+      <div class="opt-head"><span class="badge">방식 A</span><h2>투명도만 낮추기 (opacity)</h2></div>
+      <p class="opt-desc">색은 그대로 두고 카드 전체를 반투명하게 — 가장 손이 적게 가고, 리스트를 쭉 훑을 때 "끝난 건 옅게 보인다"는 느낌이 자연스럽습니다.</p>
+
+      <div class="row-label">학적변동</div>
+      <div class="cards-row">
+        <div class="sc-card treat-opacity">
+          <div class="sc-strip"><span class="sc-tag">휴학</span><span class="date">신청 09-05</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">김</div><div><div class="sc-name">김민준 <span>202312345</span></div><div class="sc-dept">소프트웨어융합과</div></div></div>
+            <p class="sc-reason">휴학 · 일반휴학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">학과장 승인 대기</span><span class="sc-status-pill progress">1/3</span></div>
+            <div class="segs"><span class="on"></span><span></span><span></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-opacity is-finished">
+          <div class="sc-strip"><span class="sc-tag">복학</span><span class="date">신청 08-20</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">이</div><div><div class="sc-name">이서연 <span>202198765</span></div><div class="sc-dept">빅데이터과</div></div></div>
+            <p class="sc-reason">복학 · 일반복학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">모든 단계 승인 완료</span><span class="sc-status-pill done">3/3</span></div>
+            <div class="segs"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-opacity is-finished">
+          <div class="sc-strip"><span class="sc-tag">자퇴</span><span class="date">신청 08-11</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">박</div><div><div class="sc-name">박지훈 <span>202045678</span></div><div class="sc-dept">경영학과</div></div></div>
+            <p class="sc-reason">자퇴 · 일신상 사유</p>
+            <div class="sc-stage-row"><span class="sc-stage-text rejected">학과장 단계에서 반려됨</span><span class="sc-status-pill rejected">반려</span></div>
+            <div class="segs"><span class="on"></span><span class="off-rej"></span><span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-label">결재현황</div>
+      <div class="cards-row">
+        <div class="ap-card treat-opacity">
+          <div class="ap-strip"><span class="ap-tag expense">지출/출장</span><span class="date">09-07 16:47</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">소프트웨어융합과</div>
+            <div class="ap-title">2026년도 과정평가형 지원금지출_9월분 행정업무지원 수당</div>
+            <div class="ap-footer"><span class="ap-who">현재 단계: 최이정 결재중</span><span class="ap-status progress">진행중</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-opacity is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">08-14 10:05</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">빅데이터과 · 정유진</div>
+            <div class="ap-title">하계 졸업사정대장 제출 건 - 수정 재제출</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 교무처장</span><span class="ap-status done">완료</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-opacity is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">09-07 11:20</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">산학협력단</div>
+            <div class="ap-title">2026-2학기 산업체 현장실습 심의</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 박서준</span><span class="ap-status rejected">반려</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 방식 B -->
+    <div class="opt-block">
+      <div class="opt-head"><span class="badge">방식 B</span><h2>회색조 필터 (grayscale)</h2></div>
+      <p class="opt-desc">색상 자체를 흑백으로 눌러버려서 "완전히 끝났다"는 느낌이 가장 강합니다. 다만 상태 배지 색(빨강/초록 등)까지 같이 죽어서, 카드만 보고 반려인지 완료인지 구분하려면 텍스트를 읽어야 해요.</p>
+
+      <div class="row-label">학적변동</div>
+      <div class="cards-row">
+        <div class="sc-card treat-grayscale">
+          <div class="sc-strip"><span class="sc-tag">휴학</span><span class="date">신청 09-05</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">김</div><div><div class="sc-name">김민준 <span>202312345</span></div><div class="sc-dept">소프트웨어융합과</div></div></div>
+            <p class="sc-reason">휴학 · 일반휴학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">학과장 승인 대기</span><span class="sc-status-pill progress">1/3</span></div>
+            <div class="segs"><span class="on"></span><span></span><span></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-grayscale is-finished">
+          <div class="sc-strip"><span class="sc-tag">복학</span><span class="date">신청 08-20</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">이</div><div><div class="sc-name">이서연 <span>202198765</span></div><div class="sc-dept">빅데이터과</div></div></div>
+            <p class="sc-reason">복학 · 일반복학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">모든 단계 승인 완료</span><span class="sc-status-pill done">3/3</span></div>
+            <div class="segs"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-grayscale is-finished">
+          <div class="sc-strip"><span class="sc-tag">자퇴</span><span class="date">신청 08-11</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">박</div><div><div class="sc-name">박지훈 <span>202045678</span></div><div class="sc-dept">경영학과</div></div></div>
+            <p class="sc-reason">자퇴 · 일신상 사유</p>
+            <div class="sc-stage-row"><span class="sc-stage-text rejected">학과장 단계에서 반려됨</span><span class="sc-status-pill rejected">반려</span></div>
+            <div class="segs"><span class="on"></span><span class="off-rej"></span><span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-label">결재현황</div>
+      <div class="cards-row">
+        <div class="ap-card treat-grayscale">
+          <div class="ap-strip"><span class="ap-tag expense">지출/출장</span><span class="date">09-07 16:47</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">소프트웨어융합과</div>
+            <div class="ap-title">2026년도 과정평가형 지원금지출_9월분 행정업무지원 수당</div>
+            <div class="ap-footer"><span class="ap-who">현재 단계: 최이정 결재중</span><span class="ap-status progress">진행중</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-grayscale is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">08-14 10:05</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">빅데이터과 · 정유진</div>
+            <div class="ap-title">하계 졸업사정대장 제출 건 - 수정 재제출</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 교무처장</span><span class="ap-status done">완료</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-grayscale is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">09-07 11:20</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">산학협력단</div>
+            <div class="ap-title">2026-2학기 산업체 현장실습 심의</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 박서준</span><span class="ap-status rejected">반려</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 방식 C -->
+    <div class="opt-block">
+      <div class="opt-head"><span class="badge">방식 C (추천)</span><h2>중립톤으로 다시 칠하기</h2></div>
+      <p class="opt-desc">필터가 아니라 배경·배지 색을 직접 무채색으로 바꿉니다. 완료/반려 배지는 색은 죽되 여전히 "완료"/"반려" 글자로 구분은 되고, 카드 자체는 살짝 어두운 배경으로 눈에 덜 띄게 가라앉습니다. 세 방식 중 가독성과 완성도가 가장 좋습니다.</p>
+
+      <div class="row-label">학적변동</div>
+      <div class="cards-row">
+        <div class="sc-card treat-neutral">
+          <div class="sc-strip"><span class="sc-tag">휴학</span><span class="date">신청 09-05</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">김</div><div><div class="sc-name">김민준 <span>202312345</span></div><div class="sc-dept">소프트웨어융합과</div></div></div>
+            <p class="sc-reason">휴학 · 일반휴학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">학과장 승인 대기</span><span class="sc-status-pill progress">1/3</span></div>
+            <div class="segs"><span class="on"></span><span></span><span></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-neutral is-finished">
+          <div class="sc-strip"><span class="sc-tag">복학</span><span class="date">신청 08-20</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">이</div><div><div class="sc-name">이서연 <span>202198765</span></div><div class="sc-dept">빅데이터과</div></div></div>
+            <p class="sc-reason">복학 · 일반복학</p>
+            <div class="sc-stage-row"><span class="sc-stage-text">모든 단계 승인 완료</span><span class="sc-status-pill done">3/3</span></div>
+            <div class="segs"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+          </div>
+        </div>
+        <div class="sc-card treat-neutral is-finished">
+          <div class="sc-strip"><span class="sc-tag">자퇴</span><span class="date">신청 08-11</span></div>
+          <div class="sc-body">
+            <div class="sc-person"><div class="avatar">박</div><div><div class="sc-name">박지훈 <span>202045678</span></div><div class="sc-dept">경영학과</div></div></div>
+            <p class="sc-reason">자퇴 · 일신상 사유</p>
+            <div class="sc-stage-row"><span class="sc-stage-text rejected">학과장 단계에서 반려됨</span><span class="sc-status-pill rejected">반려</span></div>
+            <div class="segs"><span class="on"></span><span class="off-rej"></span><span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-label">결재현황</div>
+      <div class="cards-row">
+        <div class="ap-card treat-neutral">
+          <div class="ap-strip"><span class="ap-tag expense">지출/출장</span><span class="date">09-07 16:47</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">소프트웨어융합과</div>
+            <div class="ap-title">2026년도 과정평가형 지원금지출_9월분 행정업무지원 수당</div>
+            <div class="ap-footer"><span class="ap-who">현재 단계: 최이정 결재중</span><span class="ap-status progress">진행중</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-neutral is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">08-14 10:05</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">빅데이터과 · 정유진</div>
+            <div class="ap-title">하계 졸업사정대장 제출 건 - 수정 재제출</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 교무처장</span><span class="ap-status done">완료</span></div>
+          </div>
+        </div>
+        <div class="ap-card treat-neutral is-finished">
+          <div class="ap-strip"><span class="ap-tag internal">내부기안</span><span class="date">09-07 11:20</span></div>
+          <div class="ap-body">
+            <div class="ap-dept">산학협력단</div>
+            <div class="ap-title">2026-2학기 산업체 현장실습 심의</div>
+            <div class="ap-footer"><span class="ap-who">최근 처리자: 박서준</span><span class="ap-status rejected">반려</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

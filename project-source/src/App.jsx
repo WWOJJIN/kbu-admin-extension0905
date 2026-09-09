@@ -1,6 +1,8 @@
 import { useEffect } from "react";
+import Header from "./components/Header.jsx";
 import Navbar from "./components/Navbar.jsx";
-import BriefingPage from "./components/BriefingPage.jsx";
+// 2026-09-07(29): "브리핑 탭 날려줘" 요청으로 BriefingPage import/라우팅 제거
+// (파일 자체는 안 지움 — Navbar.jsx TABS에서도 같이 뺐음).
 // 2026-09-07: "협조문이랑 캘린더페이지랑 합치자" 요청으로 CalendarPage.jsx는
 // 더 이상 별도 탭으로 라우팅하지 않는다(CoopPage.jsx가 흡수 — 그 파일 상단
 // 주석 참고). CalendarPage.jsx/CalendarGrid.jsx 파일 자체는 남아있고,
@@ -16,7 +18,6 @@ import useStore from "./store/useStore.js";
 import { initDB, getNewCoopDocs } from "./lib/db.js";
 
 const PAGES = {
-  briefing: BriefingPage,
   coop: CoopPage,
   approval: ApprovalStatusPage,
   status: StatusChangePage,
@@ -83,10 +84,19 @@ export default function App() {
     };
   }, [showToast, loadCoopDocs, backfillMissingDrafters, pruneOutOfScopeCoopDocs, loadUserProfile]);
 
+  // 2026-09-07(26): "내 이름/직책은 우측 상단으로, 알림 버튼도 그 옆으로"
+  // 요청으로 Header.jsx(상단 고정 h-16 바)를 새로 추가 — 사이드바 안에 있던
+  // 브랜드 로고/사용자 정보/알림 벨이 전부 여기로 옮겨감. 콘텐츠 영역은
+  // 기존 ml-72(사이드바 폭)에 pt-16(헤더 높이)만 추가.
+  // 2026-09-07(27): "우측 내용 있는 부분은 배경 흰색으로" 요청 — 콘텐츠
+  // 래퍼에 bg-white를 직접 줌(바깥 div의 bg-brand-alt는 페이지별 컴포넌트가
+  // 자기 배경을 안 채우는 극히 일부 여백에만 보이던 색이었는데, 이제 콘텐츠
+  // 영역 전체가 흰색으로 덮여서 사실상 안 보임 — 그대로 둬도 무해해서 유지).
   return (
     <div className="min-h-screen bg-brand-alt">
+      <Header />
       <Navbar />
-      <div className="ml-72 min-h-screen">
+      <div className="ml-72 min-h-screen pt-16 bg-white">
         <Page />
       </div>
       {selectedDocId && <CoopDetailModal docId={selectedDocId} />}

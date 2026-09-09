@@ -263,6 +263,27 @@ export async function markCoopDocRead(id) {
 }
 
 /**
+ * 2026-09-08: Header.jsx 알림 센터 "모두 읽음" 버튼용 — 지금 미확인(is_new)인
+ * 협조문을 전부 한 번에 읽음 처리한다. markCoopDocRead(id)를 문서 개수만큼
+ * 반복 호출하는 것과 동일하지만, 매번 별도 트랜잭션을 여는 대신 하나의
+ * readwrite 트랜잭션 안에서 처리해서 문서가 많아도 한 번에 끝나게 했다.
+ */
+export async function markAllCoopDocsRead() {
+  const db = await initDB();
+  const tx = db.transaction(STORE_COOP_DOCS, "readwrite");
+  const all = await tx.store.getAll();
+  await Promise.all(
+    all
+      .filter((doc) => doc.is_new === true)
+      .map((doc) => {
+        doc.is_new = false;
+        return tx.store.put(doc);
+      })
+  );
+  await tx.done;
+}
+
+/**
  * 처리 완료 표시. 캘린더 dot은 유지됨.
  * ⚠️ 2026-09-07: 예전엔 "완료 처리 = 액션 목록에서 제거"였는데, "완료 누르면
  * 메모가 안 보인다"는 리포트로 TaskPanel.jsx가 완료된 항목도 목록에 계속
@@ -647,6 +668,11 @@ export async function hasApprovalStatusChanged(id, latest) {
  * @property {string} accpCnt                승인 진행 카운트 (변경 감지용)
  * @property {string} attachNm
  * @property {StatusChangeStage[]} stages
+ * @property {number|null} [resolved_at]     2026-09-07(26) 추가 — 반려로
+ *   확정되거나(어느 단계든 반려) 최종 승인 완료로 확정된 시각(Date.now()).
+ *   진행 중(대기)이면 null. background.js가 폴링 때마다 계산해서, 한 번
+ *   찍히면 이후엔 값을 유지(다음 폴링에서 갱신 안 함) — pruneOldStatusChanges가
+ *   이 시각 기준 30일 지난 항목을 삭제.
  * @property {number} created_at
  */
 
@@ -677,6 +703,17 @@ export async function getAllStatusChanges() {
 export async function upsertStatusChange(item) {
   const db = await initDB();
   await db.put(STORE_STATUS_CHANGES, item);
+}
+
+/**
+ * 학적변동 항목 삭제. 2026-09-07(26) 추가 — background.js의
+ * pruneOldStatusChanges()가 반려/최종승인 후 30일 지난 항목을 정리할 때 씀
+ * (coopDocs의 deleteCoopDoc과 동일한 패턴).
+ * @param {string} id
+ */
+export async function deleteStatusChange(id) {
+  const db = await initDB();
+  await db.delete(STORE_STATUS_CHANGES, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -764,10 +801,10 @@ export async function setDeptCodes(list) {
  */
 
 // 기능(탭)별 사용 여부. 꺼진 기능은 탭 자체가 안 보이고, status(학적변동)는
-// background.js에서 동기화도 건너뛴다. admin의 실제 탭 구성(briefing/coop/
-// approval/calendar/chat)에 kbu의 status(학적변동)를 추가한 세트.
+// background.js에서 동기화도 건너뛴다. admin의 실제 탭 구성(coop/approval/
+// calendar/chat)에 kbu의 status(학적변동)를 추가한 세트.
+// 2026-09-07(29): "브리핑 탭 날려줘" 요청으로 briefing 토글 제거.
 export const DEFAULT_FEATURE_TOGGLES = {
-  briefing: true,
   coop: true,
   approval: true,
   calendar: true,

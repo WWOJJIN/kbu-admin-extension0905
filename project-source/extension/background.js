@@ -23,6 +23,8 @@ import {
   getAllApprovalItems,
   getStatusChange,
   upsertStatusChange,
+  getAllStatusChanges,
+  deleteStatusChange,
   getFeatureToggles,
   setFeatureEnabled,
   getAutoDetailFetchOnArrival,
@@ -564,6 +566,70 @@ function statusChangeKey(row) {
   return `SREG-${row.stuno}-${row.schregModAplyDt}-${row.schregModGbn}`;
 }
 
+// 2026-09-07(26): "반려는 반려 날짜 기준, 최종 승인은 최종 승인 기준으로
+// 한 달 지나면 삭제해줘" 요청 — 삭제 판단을 UI(StatusChangePage.jsx)가
+// "반려/완료"를 보여줄 때 쓰는 것과 똑같은 기준으로 하려고 그 파일의
+// stageStatus/isRejected/isDone 로직을 여기 그대로 옮겨왔다. background.js는
+// 별도 번들(esbuild)이라 컴포넌트 파일을 직접 import할 수 없어서 부득이하게
+// 중복 — 승인단계 판정 규칙을 바꿀 일이 생기면 StatusChangePage.jsx와 여기
+// 둘 다 같이 고쳐야 한다.
+function stageStatus(stage) {
+  const v = stage?.accpGbnNm;
+  if (!v || v === "미승인") return "pending";
+  if (v.includes("반려")) return "rejected";
+  return "approved";
+}
+
+function stagesRejected(stages) {
+  return (stages || []).some((s) => stageStatus(s) === "rejected");
+}
+
+// StatusChangePage.jsx의 isDone()과 동일 — 마지막 단계가 승인이면 그 앞
+// 단계가 미승인으로 남아있어도 완료로 본다("지도교수 건너뛰고 윗단계가
+// 먼저 승인" 케이스, 2026-09-07(16) 참고).
+function stagesDone(stages) {
+  if (!stages || stages.length === 0) return false;
+  if (stagesRejected(stages)) return false;
+  if (stages.every((s) => stageStatus(s) === "approved")) return true;
+  return stageStatus(stages[stages.length - 1]) === "approved";
+}
+
+const STATUS_CHANGE_PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000; // 30일
+
+/**
+ * 반려로 확정되거나 최종 승인 완료로 확정된 지 30일 지난 학적변동 항목을
+ * 삭제한다. resolved_at(반려/최종승인이 처음 확정된 시각, 아래 doc 빌드
+ * 부분에서 채움)이 없는(=아직 진행 중인) 항목은 절대 건드리지 않는다.
+ * 매 폴링(1분 주기) 끝에 호출 — 삭제 자체는 가벼운 로컬 IndexedDB 순회라
+ * 매번 돌려도 부담 없음.
+ */
+async function pruneOldStatusChanges() {
+  let all;
+  try {
+    all = await getAllStatusChanges();
+  } catch (err) {
+    console.warn("[background] 학적변동 오래된 항목 정리 — 목록 조회 실패:", err);
+    return 0;
+  }
+  const now = Date.now();
+  let deleted = 0;
+  for (const item of all) {
+    if (!item.resolved_at) continue; // 아직 진행 중 — 보존
+    if (now - item.resolved_at >= STATUS_CHANGE_PRUNE_AFTER_MS) {
+      try {
+        await deleteStatusChange(item.id);
+        deleted++;
+      } catch (err) {
+        console.warn("[background] 학적변동 항목 삭제 실패:", item.id, err);
+      }
+    }
+  }
+  if (deleted > 0) {
+    console.log(`[background] 학적변동 오래된 항목 ${deleted}건 정리 완료(반려/최종승인 30일 경과).`);
+  }
+  return deleted;
+}
+
 /**
  * 학적변동대상자목록을 폴링해서 신규 신청/승인 단계 변경을 감지하고 알림을 띄운다.
  * @returns {Promise<{total: number, processed: number, newCount: number, changedCount: number, skipped?: boolean, autoDisabled?: boolean}>}
@@ -682,6 +748,12 @@ async function pollStatusChangesInner() {
       console.warn("[background] 학적변동 승인단계 조회 실패:", key, err);
     }
 
+    // 2026-09-07(26): 반려/최종승인이 "이번에 처음 확정"됐으면 지금 시각을
+    // 찍고, 이미 확정돼 있었으면(prev.resolved_at 있음) 그 값을 그대로
+    // 유지한다 — 매 폴링마다 갱신하면 "확정 후 30일"이 영원히 안 지남.
+    const resolvedNow = stagesRejected(stages) || stagesDone(stages);
+    const resolved_at = resolvedNow ? prev?.resolved_at || Date.now() : null;
+
     const doc = {
       id: key,
       stuno: row.stuno || "",
@@ -700,6 +772,7 @@ async function pollStatusChangesInner() {
       stages,
       schemaVersion: STATUS_SCHEMA_VERSION,
       created_at: prev?.created_at || Date.now(),
+      resolved_at,
     };
 
     // 단계별로 뭐가 바뀌었는지 비교해서, 바뀐 단계마다 개별 알림
@@ -738,6 +811,16 @@ async function pollStatusChangesInner() {
 
   if (isBaseline) {
     await setSyncBaselineDone("statusChange");
+  }
+
+  // 2026-09-07(26): 매 폴링(1분 주기) 끝에 오래된 항목 정리도 같이 돈다.
+  // 베이스라인 회차(이 브라우저에서 처음 저장하는 회차)에도 그대로 돌려도
+  // 안전 — resolved_at이 찍힌(=반려/최종승인 확정된) 지 30일 넘은 항목만
+  // 지우는 거라 방금 막 채워넣은 데이터를 잘못 지울 위험이 없다.
+  try {
+    await pruneOldStatusChanges();
+  } catch (err) {
+    console.warn("[background] 학적변동 오래된 항목 정리 중 오류:", err);
   }
 
   return { total: listRows.length, processed: rows.length, newCount, changedCount };
@@ -997,4 +1080,123 @@ function notifyStatusChanged(item) {
     message: `${item.subject || "협조문"} 상태가 변경되었습니다.`,
     priority: 1,
   });
+}
+
+// ---------------------------------------------------------------------------
+// 협조문/내부기안 초안 작성 챗봇 — ERP 작성화면으로 이동 + 자동 채움
+// ---------------------------------------------------------------------------
+// 2026-09-08 신규. ChatPage.jsx가 AI로 초안(제목/사업개요/본문)을 만든 뒤
+// "작성하러 가기"를 누르면 chrome.runtime.sendMessage로 여기에 요청이 온다.
+// 이 파일은 kis.kbu.ac.kr 탭을 찾거나 새로 열고, 그 탭 안의 content.js(실제
+// DOM 조작 담당)에게 chrome.tabs.sendMessage로 채울 내용을 전달하는 중개
+// 역할만 한다 — 화면 안의 입력칸을 직접 건드리는 코드는 전부 content.js에
+// 있다(그쪽이 실제 ERP 페이지 컨텍스트에서 실행되는 콘텐츠 스크립트라서).
+//
+// ⚠️ 여기서도 저장/제출은 절대 하지 않는다 — content.js가 화면 이동과 입력칸
+// 채움까지만 하고, 임시저장/상신하기는 사람이 반드시 직접 눌러야 한다는 원칙을
+// 그대로 따른다.
+
+const ERP_BASE_URL = "https://kis.kbu.ac.kr/nx/index.html";
+// content.js가 아직 초기화되기 전이라 "Could not establish connection" 에러가
+// 날 수 있어서 몇 번 재시도한다 — 새 탭을 막 열었을 때 특히 그렇다. fetch
+// 실패 시 1회 재시도하는 다른 API 헬퍼들과 같은 관용(코딩 규칙)이지만, 이건
+// "content.js가 뜨는 타이밍" 문제라 재시도 횟수를 좀 더 넉넉히 준다.
+const CONTENT_SCRIPT_RETRY_COUNT = 6;
+const CONTENT_SCRIPT_RETRY_DELAY_MS = 700;
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "KBU_ASSISTANT_GOTO_ERP_DRAFT") return; // 다른 메시지는 무시(향후 확장 대비)
+  goToErpDraftScreen(message.payload)
+    .then(() => sendResponse({ ok: true }))
+    .catch((err) => {
+      console.error("[background] ERP 작성화면 이동/채움 실패:", err);
+      sendResponse({ ok: false, error: String(err?.message || err) });
+    });
+  return true; // 비동기로 sendResponse를 쓰겠다는 표시 (chrome 확장 메시징 관례)
+});
+
+async function goToErpDraftScreen(payload) {
+  const tab = await findOrOpenErpTab();
+  await ensureTabActive(tab);
+  try {
+    await sendFillMessageWithRetry(tab.id, payload);
+  } catch (err) {
+    // "Could not establish connection. Receiving end does not exist."는 재시도로
+    // 안 풀리는 경우가 있음 — content.js가 그 탭에 아예 주입이 안 된 상태(가장
+    // 흔한 원인: 이 탭이 이미 열려있는 채로 확장을 새로고침한 경우. content_scripts는
+    // "새로 로드되는 페이지"에만 자동 주입되고, 확장 리로드 이전부터 열려있던
+    // 탭에는 안 들어간다). 이럴 땐 탭을 한 번 새로고침해서 content.js가 새로
+    // 주입되게 만든 다음 다시 시도한다.
+    if (!isConnectionError(err)) throw err;
+    await reloadTabAndWait(tab.id);
+    await sendFillMessageWithRetry(tab.id, payload);
+  }
+}
+
+function isConnectionError(err) {
+  const msg = String(err?.message || err || "");
+  return /Could not establish connection|Receiving end does not exist/.test(msg);
+}
+
+function reloadTabAndWait(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.reload(tabId, {}, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  }).then(() => waitForTabComplete(tabId));
+}
+
+/**
+ * kis.kbu.ac.kr 탭이 이미 열려있으면 재사용하고, 없으면 새로 연다. 새로 연
+ * 경우 페이지 로드가 끝날 때까지(status "complete") 기다린다.
+ */
+async function findOrOpenErpTab() {
+  const existing = await chrome.tabs.query({ url: "https://kis.kbu.ac.kr/*" });
+  if (existing.length > 0) return existing[0];
+
+  const created = await chrome.tabs.create({ url: ERP_BASE_URL });
+  await waitForTabComplete(created.id);
+  return created;
+}
+
+function waitForTabComplete(tabId) {
+  return new Promise((resolve) => {
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function ensureTabActive(tab) {
+  await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+}
+
+async function sendFillMessageWithRetry(tabId, payload, attempt = 0) {
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, {
+      type: "KBU_ASSISTANT_FILL_DRAFT",
+      payload,
+    });
+    if (!res?.ok) throw new Error(res?.error || "content.js가 채우기에 실패했습니다.");
+    return res;
+  } catch (err) {
+    if (attempt < CONTENT_SCRIPT_RETRY_COUNT) {
+      await sleep(CONTENT_SCRIPT_RETRY_DELAY_MS);
+      return sendFillMessageWithRetry(tabId, payload, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
